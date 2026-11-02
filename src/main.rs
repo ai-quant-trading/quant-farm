@@ -209,6 +209,15 @@ enum Commands {
         #[arg(long, default_value = "data/ticks_1s.db")]
         db_path: String,
     },
+    /// 策略健康监测：滚动实盘表现 vs 现场重算的回测基线，四监测器分级早警边际衰减
+    Health {
+        /// 生产账本数据库路径
+        #[arg(long, default_value = "data/coin_ai.db")]
+        db_path: String,
+        /// Markdown 报告输出路径
+        #[arg(short, long, default_value = "reports/health_report.md")]
+        report: String,
+    },
     /// 回放压测：用真实 1s tick 重放极端/趋势/震荡窗口，注入订单落地延迟，测量滑点与盈亏影响
     ReplayStress {
         /// 选取的压力窗口数量 (急跌/急涨/高波动/横盘 各保证一个)
@@ -564,6 +573,10 @@ async fn main() -> Result<()> {
         Commands::DrillBlackSwan { db_path } => {
             let engine = SqlitePaperEngine::new(cfg, &db_path)?;
             engine.run_black_swan_drill(&data_mgr).await?;
+        }
+        Commands::Health { db_path, report } => {
+            let hr = coin_ai::health::run_health_check(&cfg, &db_path, &data_mgr).await?;
+            coin_ai::health::render_report(&hr, &report)?;
         }
         Commands::DownloadTicks {
             days,

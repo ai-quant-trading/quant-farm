@@ -1550,6 +1550,43 @@ impl SqlitePaperEngine {
                     }
                     Err(e) => warn!("[统计归档失败] {} (守护进程继续运行)", e),
                 }
+
+                // 策略健康监测：滚动实盘表现 vs 现场重算基线，分级告警（书的第17课/附录B#3）
+                if self.cfg.health.enabled {
+                    match crate::health::run_health_check(&self.cfg, &self.db_path, data_mgr)
+                        .await
+                    {
+                        Ok(hr) => {
+                            let _ = crate::health::render_report(&hr, "reports/health_report.md");
+                            let notifier = crate::notify::Notifier::from_env();
+                            for m in &hr.monitors {
+                                if m.level == crate::health::Level::Red {
+                                    let _ = notifier
+                                        .send(
+                                            crate::notify::AlertLevel::Critical,
+                                            "策略健康 RED",
+                                            &format!("{} | {}", m.name, m.detail),
+                                        )
+                                        .await;
+                                } else if m.level == crate::health::Level::Yellow {
+                                    let _ = notifier
+                                        .send(
+                                            crate::notify::AlertLevel::Warning,
+                                            "策略健康 YELLOW",
+                                            &format!("{} | {}", m.name, m.detail),
+                                        )
+                                        .await;
+                                }
+                            }
+                            info!(
+                                "[整点健康监测] 总体状态: {} | {} 项监测",
+                                hr.overall.label(),
+                                hr.monitors.len()
+                            );
+                        }
+                        Err(e) => warn!("[健康监测失败] {} (守护进程继续运行)", e),
+                    }
+                }
             }
 
             if step < cycles {

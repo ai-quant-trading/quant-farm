@@ -57,3 +57,16 @@ atr_percentile_lookback = 200
 # 只用决策时刻的过去数据；A/B 验证见 reports/replay_stress.md（级联情景护圈对比）。
 max_recent_move_bps = "30"
 recent_move_window_secs = 10
+
+[health]
+# 策略健康监测（边际衰减早警）：滚动实盘表现 vs 现场重算的回测基线
+enabled = true
+window_trades = 30        # 边际窗口：最近 N 笔闭环
+window_days = 30          # 时间窗
+min_trades = 20           # 判定最少样本
+pf_yellow = "1.0"         # M1 黄线
+pf_red = "0.8"            # M1 红线 (与 avg_r_red 同时满足)
+avg_r_red = "-0.15"
+drift_bull_pp = 15        # M2 黄线：Bull 占比偏差 pp
+cost_mult_yellow = "1.5"  # M4 黄线：成本超假设倍数
+baseline_bars = 9000      # 基线重算 K 线数

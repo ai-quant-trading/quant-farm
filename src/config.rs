@@ -11,6 +11,92 @@ pub struct AppConfig {
     pub risk: RiskConfig,
     pub costs: CostsConfig,
     pub strategy: StrategyConfig,
+    /// 策略健康监测（边际衰减早警）：滚动实盘表现 vs 现场重算的回测基线
+    #[serde(default)]
+    pub health: HealthConfig,
+}
+
+/// 健康监测配置——全部有安全缺省，缺 [health] 段也能跑
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HealthConfig {
+    /// 总开关（false 时整点检查与 CLI 仅报告不告警）
+    #[serde(default = "default_health_enabled")]
+    pub enabled: bool,
+    /// 边际衰减窗口：最近 N 笔闭环交易
+    #[serde(default = "default_health_window_trades")]
+    pub window_trades: usize,
+    /// 时间窗：最近 N 天
+    #[serde(default = "default_health_window_days")]
+    pub window_days: u64,
+    /// 判定所需最少样本（不足 = 灰色"样本不足"，不告警）
+    #[serde(default = "default_health_min_trades")]
+    pub min_trades: usize,
+    /// M1 黄线：窗口 PF 低于此值
+    #[serde(default = "default_health_pf_yellow")]
+    pub pf_yellow: Decimal,
+    /// M1 红线：窗口 PF 低于此值
+    #[serde(default = "default_health_pf_red")]
+    pub pf_red: Decimal,
+    /// M1 红线：窗口平均 R 低于此值（与 PF 红线同时满足才 RED）
+    #[serde(default = "default_health_avg_r_red")]
+    pub avg_r_red: Decimal,
+    /// M2 黄线：近60天 Bull 占比与基线样本偏差超过此 pp 数
+    #[serde(default = "default_health_drift_pp")]
+    pub drift_bull_pp: Decimal,
+    /// M4 黄线：实盘均笔成本超过回测假设的倍数
+    #[serde(default = "default_health_cost_mult")]
+    pub cost_mult_yellow: Decimal,
+    /// 基线重算使用的 1h K 线根数
+    #[serde(default = "default_health_baseline_bars")]
+    pub baseline_bars: usize,
+}
+
+impl Default for HealthConfig {
+    fn default() -> Self {
+        Self {
+            enabled: default_health_enabled(),
+            window_trades: default_health_window_trades(),
+            window_days: default_health_window_days(),
+            min_trades: default_health_min_trades(),
+            pf_yellow: default_health_pf_yellow(),
+            pf_red: default_health_pf_red(),
+            avg_r_red: default_health_avg_r_red(),
+            drift_bull_pp: default_health_drift_pp(),
+            cost_mult_yellow: default_health_cost_mult(),
+            baseline_bars: default_health_baseline_bars(),
+        }
+    }
+}
+
+fn default_health_enabled() -> bool {
+    true
+}
+fn default_health_window_trades() -> usize {
+    30
+}
+fn default_health_window_days() -> u64 {
+    30
+}
+fn default_health_min_trades() -> usize {
+    20
+}
+fn default_health_pf_yellow() -> Decimal {
+    Decimal::ONE
+}
+fn default_health_pf_red() -> Decimal {
+    dec!(0.8)
+}
+fn default_health_avg_r_red() -> Decimal {
+    dec!(-0.15)
+}
+fn default_health_drift_pp() -> Decimal {
+    dec!(15)
+}
+fn default_health_cost_mult() -> Decimal {
+    dec!(1.5)
+}
+fn default_health_baseline_bars() -> usize {
+    9000
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
