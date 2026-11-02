@@ -209,6 +209,8 @@ enum Commands {
         #[arg(long, default_value = "data/ticks_1s.db")]
         db_path: String,
     },
+    /// 查看影子模式账本（BearShort 零资金并行实盘积累 live OOS 证据）
+    ShadowStatus,
     /// Monte Carlo 鲁棒性检验：Bootstrap 重抽 + 成本压力 + 参数扰动 ±20% + Bonferroni 校正
     MonteCarlo {
         /// 回测 K 线根数
@@ -591,6 +593,9 @@ async fn main() -> Result<()> {
         Commands::DrillBlackSwan { db_path } => {
             let engine = SqlitePaperEngine::new(cfg, &db_path)?;
             engine.run_black_swan_drill(&data_mgr).await?;
+        }
+        Commands::ShadowStatus => {
+            coin_ai::shadow::print_shadow_status(&cfg)?;
         }
         Commands::MonteCarlo {
             bars,

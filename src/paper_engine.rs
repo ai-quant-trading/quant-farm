@@ -1088,6 +1088,22 @@ impl SqlitePaperEngine {
         let mut rolling_baseline_prices: HashMap<String, Decimal> = HashMap::new();
         // 下单前波动闸门的价格历史环形缓冲：每周期记录 (ts, last_price)，仅保留最近 120 秒
         let mut price_history: HashMap<String, Vec<(i64, Decimal)>> = HashMap::new();
+        // BearShort 影子模式（零资金、独立账本、只记账不下单，积累 live OOS 证据）
+        let mut shadow = if self.cfg.shadow.enabled {
+            match crate::shadow::ShadowEngine::new(&self.cfg) {
+                Ok(s) => Some(s),
+                Err(e) => {
+                    warn!("[影子] 初始化失败 ({}), 本轮不启用影子模式", e);
+                    None
+                }
+            }
+        } else {
+            None
+        };
+        // 启动即扫一次影子候选（不等整点刷新——熊市正在进行）
+        if let Some(sh) = shadow.as_mut() {
+            sh.on_metrics(&btc_candles, &universe_candles, regime);
+        }
         let mut refresh_task: Option<
             tokio::task::JoinHandle<
                 Result<(
@@ -1153,6 +1169,10 @@ impl SqlitePaperEngine {
                                 "[指标刷新] 已完成小时级增量刷新 | BTC 大盘状态: {:?} | 可交易标的: {} 个",
                                 regime, tradable
                             );
+                            // 影子模式整点重算 BearShort 候选信号（真信号零资金）
+                            if let Some(sh) = shadow.as_mut() {
+                                sh.on_metrics(&btc_candles, &universe_candles, regime);
+                            }
                         }
                         Ok(Err(e)) => {
                             warn!("[指标刷新失败] {} (沿用上一轮指标，守护进程继续运行)", e)
@@ -1518,6 +1538,13 @@ impl SqlitePaperEngine {
             acct.updated_at = now_str;
             db.update_account_state(&acct)?;
 
+            // 影子模式每拍巡检（同盘口/同状态机/同出场规则，独立账本零资金）
+            if let Some(sh) = shadow.as_mut() {
+                if let Err(e) = sh.on_cycle(&quotes, regime, &coin_metrics, now_ms) {
+                    warn!("[影子巡检失败] {} (影子本轮跳过，不影响生产)", e);
+                }
+            }
+
             let (q_cnt, o_cnt, p_cnt, t_cnt) = db.count_table_rows()?;
             info!(
                 "[API 巡检 #{}/{}] 已写入 SQLite ({}): 实时盘口报价={}条, 订单={}笔, 当前持仓={}个, 已结算交易={}单 | 账户实时净值: {:.2} USDT (浮盈 {:+.3}U)",
@@ -1583,6 +1610,9 @@ impl SqlitePaperEngine {
                                 hr.overall.label(),
                                 hr.monitors.len()
                             );
+                            if let Some(sh) = shadow.as_ref() {
+                                info!("[影子摘要] {}", sh.summary());
+                            }
                         }
                         Err(e) => warn!("[健康监测失败] {} (守护进程继续运行)", e),
                     }

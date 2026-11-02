@@ -70,3 +70,13 @@ avg_r_red = "-0.15"
 drift_bull_pp = 15        # M2 黄线：Bull 占比偏差 pp
 cost_mult_yellow = "1.5"  # M4 黄线：成本超假设倍数
 baseline_bars = 9000      # 基线重算 K 线数
+
+[shadow]
+# BearShort 影子模式：真信号/真行情/真成本模型，零资金单独记账 (data/shadow_bear.db)
+# 攒够 live OOS 样本 (>=20 笔闭环) 后重新过门槛评估转正
+enabled = true
+stop_atr = "2.5"        # BS-01 网格最优（历史 OOS 拦下、实时检验中）
+tp_atr = "4.0"
+maturity_bars = 24
+variant = "both"
+min_trades_for_promotion = 20

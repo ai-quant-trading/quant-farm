@@ -14,6 +14,67 @@ pub struct AppConfig {
     /// 策略健康监测（边际衰减早警）：滚动实盘表现 vs 现场重算的回测基线
     #[serde(default)]
     pub health: HealthConfig,
+    /// BearShort 影子模式：零资金并行实盘积累 live OOS 证据（书第20课 Shadow Mode）
+    #[serde(default)]
+    pub shadow: ShadowConfig,
+}
+
+/// 影子模式配置——BearShort 以真信号/真行情/真成本、零资金单独记账
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ShadowConfig {
+    #[serde(default = "default_shadow_enabled")]
+    pub enabled: bool,
+    /// 影子库路径（与生产账本物理隔离）
+    #[serde(default = "default_shadow_db")]
+    pub db_path: String,
+    /// BS-01 网格最优参数（被历史 OOS 拦下、接受实时检验的同一套）
+    #[serde(default = "default_shadow_stop")]
+    pub stop_atr: Decimal,
+    #[serde(default = "default_shadow_tp")]
+    pub tp_atr: Decimal,
+    #[serde(default = "default_shadow_maturity")]
+    pub maturity_bars: usize,
+    #[serde(default = "default_shadow_variant")]
+    pub variant: String,
+    /// 转正评估所需最少 live OOS 闭环数
+    #[serde(default = "default_shadow_min_promo")]
+    pub min_trades_for_promotion: usize,
+}
+
+impl Default for ShadowConfig {
+    fn default() -> Self {
+        Self {
+            enabled: default_shadow_enabled(),
+            db_path: default_shadow_db(),
+            stop_atr: default_shadow_stop(),
+            tp_atr: default_shadow_tp(),
+            maturity_bars: default_shadow_maturity(),
+            variant: default_shadow_variant(),
+            min_trades_for_promotion: default_shadow_min_promo(),
+        }
+    }
+}
+
+fn default_shadow_enabled() -> bool {
+    true
+}
+fn default_shadow_db() -> String {
+    "data/shadow_bear.db".to_string()
+}
+fn default_shadow_stop() -> Decimal {
+    dec!(2.5)
+}
+fn default_shadow_tp() -> Decimal {
+    dec!(4.0)
+}
+fn default_shadow_maturity() -> usize {
+    24
+}
+fn default_shadow_variant() -> String {
+    "both".to_string()
+}
+fn default_shadow_min_promo() -> usize {
+    20
 }
 
 /// 健康监测配置——全部有安全缺省，缺 [health] 段也能跑
