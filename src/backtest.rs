@@ -185,9 +185,9 @@ impl BacktestEngine {
                         Decimal::ZERO
                     };
 
-                    // 调用 100U/200U 风控网关“以损定仓”计算器
+                    // 调用 100U/200U 风控网关“以损定仓”计算器（含模式风险缩放：BearShort 半风险）
                     if let Some(sizing) = risk_mgr.calculate_position_size(
-                        current_eq,
+                        current_eq * crate::strategy::risk_scale_factor(&self.cfg.strategy),
                         fill_entry,
                         initial_stop,
                         &spec,

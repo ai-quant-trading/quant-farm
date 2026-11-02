@@ -22,6 +22,11 @@ pub struct StrategyCandidateSpec {
     pub breakeven_r: Decimal,
     pub time_stop_bars: usize,
     pub regime_adx: Decimal,
+    // ---- BearShort 专用旋钮（None = 沿用 settings.toml 默认）----
+    pub bear_stop_atr: Option<Decimal>,
+    pub bear_tp_atr: Option<Decimal>,
+    pub bear_maturity_bars: Option<usize>,
+    pub bear_entry_variant: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -53,6 +58,7 @@ pub fn generate_strategy_candidates() -> Vec<StrategyCandidateSpec> {
             breakeven_r: dec!(1.5),
             time_stop_bars: 16,
             regime_adx: dec!(20.0),
+            bear_stop_atr: None, bear_tp_atr: None, bear_maturity_bars: None, bear_entry_variant: None,
         },
         StrategyCandidateSpec {
             id: "AW-02".to_string(),
@@ -66,6 +72,7 @@ pub fn generate_strategy_candidates() -> Vec<StrategyCandidateSpec> {
             breakeven_r: dec!(1.3),
             time_stop_bars: 14,
             regime_adx: dec!(19.0),
+            bear_stop_atr: None, bear_tp_atr: None, bear_maturity_bars: None, bear_entry_variant: None,
         },
         StrategyCandidateSpec {
             id: "AW-03".to_string(),
@@ -79,6 +86,7 @@ pub fn generate_strategy_candidates() -> Vec<StrategyCandidateSpec> {
             breakeven_r: dec!(1.5),
             time_stop_bars: 20,
             regime_adx: dec!(20.0),
+            bear_stop_atr: None, bear_tp_atr: None, bear_maturity_bars: None, bear_entry_variant: None,
         },
         StrategyCandidateSpec {
             id: "AW-04".to_string(),
@@ -92,6 +100,7 @@ pub fn generate_strategy_candidates() -> Vec<StrategyCandidateSpec> {
             breakeven_r: dec!(1.4),
             time_stop_bars: 18,
             regime_adx: dec!(22.0),
+            bear_stop_atr: None, bear_tp_atr: None, bear_maturity_bars: None, bear_entry_variant: None,
         },
         // 流派 B：Long-Only 纯多头牛市猎手 + 熊市空仓避险系列
         StrategyCandidateSpec {
@@ -106,6 +115,7 @@ pub fn generate_strategy_candidates() -> Vec<StrategyCandidateSpec> {
             breakeven_r: dec!(1.5),
             time_stop_bars: 16,
             regime_adx: dec!(20.0),
+            bear_stop_atr: None, bear_tp_atr: None, bear_maturity_bars: None, bear_entry_variant: None,
         },
         StrategyCandidateSpec {
             id: "LO-02".to_string(),
@@ -119,6 +129,7 @@ pub fn generate_strategy_candidates() -> Vec<StrategyCandidateSpec> {
             breakeven_r: dec!(1.3),
             time_stop_bars: 16,
             regime_adx: dec!(18.5),
+            bear_stop_atr: None, bear_tp_atr: None, bear_maturity_bars: None, bear_entry_variant: None,
         },
         StrategyCandidateSpec {
             id: "LO-03".to_string(),
@@ -132,6 +143,7 @@ pub fn generate_strategy_candidates() -> Vec<StrategyCandidateSpec> {
             breakeven_r: dec!(1.4),
             time_stop_bars: 22,
             regime_adx: dec!(19.0),
+            bear_stop_atr: None, bear_tp_atr: None, bear_maturity_bars: None, bear_entry_variant: None,
         },
         // 流派 C：Volatility Squeeze 波动率收敛爆发系列
         StrategyCandidateSpec {
@@ -146,6 +158,7 @@ pub fn generate_strategy_candidates() -> Vec<StrategyCandidateSpec> {
             breakeven_r: dec!(1.3),
             time_stop_bars: 16,
             regime_adx: dec!(19.0),
+            bear_stop_atr: None, bear_tp_atr: None, bear_maturity_bars: None, bear_entry_variant: None,
         },
         StrategyCandidateSpec {
             id: "VS-02".to_string(),
@@ -159,6 +172,7 @@ pub fn generate_strategy_candidates() -> Vec<StrategyCandidateSpec> {
             breakeven_r: dec!(1.4),
             time_stop_bars: 18,
             regime_adx: dec!(18.5),
+            bear_stop_atr: None, bear_tp_atr: None, bear_maturity_bars: None, bear_entry_variant: None,
         },
         // 流派 D：Trend Pullback 强势币回踩均线二次启动系列
         StrategyCandidateSpec {
@@ -173,6 +187,7 @@ pub fn generate_strategy_candidates() -> Vec<StrategyCandidateSpec> {
             breakeven_r: dec!(1.3),
             time_stop_bars: 16,
             regime_adx: dec!(19.0),
+            bear_stop_atr: None, bear_tp_atr: None, bear_maturity_bars: None, bear_entry_variant: None,
         },
         StrategyCandidateSpec {
             id: "TP-02".to_string(),
@@ -186,6 +201,7 @@ pub fn generate_strategy_candidates() -> Vec<StrategyCandidateSpec> {
             breakeven_r: dec!(1.4),
             time_stop_bars: 20,
             regime_adx: dec!(18.5),
+            bear_stop_atr: None, bear_tp_atr: None, bear_maturity_bars: None, bear_entry_variant: None,
         },
         // 流派 E：Ensemble Composite 多因子融合共振 (突破 + 回踩 + 负费率逼空)
         StrategyCandidateSpec {
@@ -200,6 +216,7 @@ pub fn generate_strategy_candidates() -> Vec<StrategyCandidateSpec> {
             breakeven_r: dec!(1.4),
             time_stop_bars: 16,
             regime_adx: dec!(19.5),
+            bear_stop_atr: None, bear_tp_atr: None, bear_maturity_bars: None, bear_entry_variant: None,
         },
         StrategyCandidateSpec {
             id: "EN-02".to_string(),
@@ -213,6 +230,7 @@ pub fn generate_strategy_candidates() -> Vec<StrategyCandidateSpec> {
             breakeven_r: dec!(1.3),
             time_stop_bars: 18,
             regime_adx: dec!(19.0),
+            bear_stop_atr: None, bear_tp_atr: None, bear_maturity_bars: None, bear_entry_variant: None,
         },
         StrategyCandidateSpec {
             id: "EN-03".to_string(),
@@ -226,6 +244,7 @@ pub fn generate_strategy_candidates() -> Vec<StrategyCandidateSpec> {
             breakeven_r: dec!(1.2),
             time_stop_bars: 16,
             regime_adx: dec!(20.0),
+            bear_stop_atr: None, bear_tp_atr: None, bear_maturity_bars: None, bear_entry_variant: None,
         },
         StrategyCandidateSpec {
             id: "EN-04".to_string(),
@@ -239,6 +258,7 @@ pub fn generate_strategy_candidates() -> Vec<StrategyCandidateSpec> {
             breakeven_r: dec!(1.5),
             time_stop_bars: 20,
             regime_adx: dec!(20.0),
+            bear_stop_atr: None, bear_tp_atr: None, bear_maturity_bars: None, bear_entry_variant: None,
         },
         // 流派 F：第二代进化策略 (GEN-2：基于第一轮冠军 LO-01 深度精细化演进)
         StrategyCandidateSpec {
@@ -253,6 +273,7 @@ pub fn generate_strategy_candidates() -> Vec<StrategyCandidateSpec> {
             breakeven_r: dec!(1.25),
             time_stop_bars: 14,
             regime_adx: dec!(20.0),
+            bear_stop_atr: None, bear_tp_atr: None, bear_maturity_bars: None, bear_entry_variant: None,
         },
         StrategyCandidateSpec {
             id: "G2-02".to_string(),
@@ -266,6 +287,7 @@ pub fn generate_strategy_candidates() -> Vec<StrategyCandidateSpec> {
             breakeven_r: dec!(1.4),
             time_stop_bars: 15,
             regime_adx: dec!(21.0),
+            bear_stop_atr: None, bear_tp_atr: None, bear_maturity_bars: None, bear_entry_variant: None,
         },
         StrategyCandidateSpec {
             id: "G2-03".to_string(),
@@ -279,6 +301,7 @@ pub fn generate_strategy_candidates() -> Vec<StrategyCandidateSpec> {
             breakeven_r: dec!(1.4),
             time_stop_bars: 18,
             regime_adx: dec!(20.0),
+            bear_stop_atr: None, bear_tp_atr: None, bear_maturity_bars: None, bear_entry_variant: None,
         },
         StrategyCandidateSpec {
             id: "G2-04".to_string(),
@@ -292,6 +315,7 @@ pub fn generate_strategy_candidates() -> Vec<StrategyCandidateSpec> {
             breakeven_r: dec!(1.3),
             time_stop_bars: 18,
             regime_adx: dec!(20.0),
+            bear_stop_atr: None, bear_tp_atr: None, bear_maturity_bars: None, bear_entry_variant: None,
         },
         StrategyCandidateSpec {
             id: "G2-05".to_string(),
@@ -305,6 +329,7 @@ pub fn generate_strategy_candidates() -> Vec<StrategyCandidateSpec> {
             breakeven_r: dec!(1.4),
             time_stop_bars: 22,
             regime_adx: dec!(20.0),
+            bear_stop_atr: None, bear_tp_atr: None, bear_maturity_bars: None, bear_entry_variant: None,
         },
         // 流派 G：第三代终极进化 (GEN-3：结合 G2-02 强放量 + LO-03 24h波段 + 震荡冷却防磨损)
         StrategyCandidateSpec {
@@ -319,6 +344,7 @@ pub fn generate_strategy_candidates() -> Vec<StrategyCandidateSpec> {
             breakeven_r: dec!(1.4),
             time_stop_bars: 18,
             regime_adx: dec!(20.5),
+            bear_stop_atr: None, bear_tp_atr: None, bear_maturity_bars: None, bear_entry_variant: None,
         },
         StrategyCandidateSpec {
             id: "G3-02".to_string(),
@@ -332,6 +358,59 @@ pub fn generate_strategy_candidates() -> Vec<StrategyCandidateSpec> {
             breakeven_r: dec!(1.4),
             time_stop_bars: 16,
             regime_adx: dec!(20.5),
+            bear_stop_atr: None, bear_tp_atr: None, bear_maturity_bars: None, bear_entry_variant: None,
+        },
+        // 流派 BS：成熟熊市空头（验尸报告驱动：成熟度门 + 拉升衰竭入场 + 非对称屏障 + 破位即撤）
+        StrategyCandidateSpec {
+            id: "BS-01".to_string(),
+            name: "熊市空头：双变体 2.5/4.0 非对称屏障 (网格最优)".to_string(),
+            mode: StrategyMode::BearShort,
+            top_k: 3,
+            donchian_period: 20,
+            volume_surge_mult: dec!(1.30),
+            initial_stop_atr: dec!(2.2),
+            chandelier_atr: dec!(3.0),
+            breakeven_r: dec!(1.5),
+            time_stop_bars: 12,
+            regime_adx: dec!(20.0),
+            bear_stop_atr: Some(dec!(2.5)),
+            bear_tp_atr: Some(dec!(4.0)),
+            bear_maturity_bars: Some(24),
+            bear_entry_variant: Some("both".to_string()),
+        },
+        StrategyCandidateSpec {
+            id: "BS-02".to_string(),
+            name: "熊市空头：拉升衰竭单变体 (治卖在底部)".to_string(),
+            mode: StrategyMode::BearShort,
+            top_k: 3,
+            donchian_period: 20,
+            volume_surge_mult: dec!(1.30),
+            initial_stop_atr: dec!(2.2),
+            chandelier_atr: dec!(3.0),
+            breakeven_r: dec!(1.5),
+            time_stop_bars: 12,
+            regime_adx: dec!(20.0),
+            bear_stop_atr: Some(dec!(2.5)),
+            bear_tp_atr: Some(dec!(4.0)),
+            bear_maturity_bars: Some(24),
+            bear_entry_variant: Some("rejection".to_string()),
+        },
+        StrategyCandidateSpec {
+            id: "BS-03".to_string(),
+            name: "熊市空头：成熟度加倍 (48h 只做大熊)".to_string(),
+            mode: StrategyMode::BearShort,
+            top_k: 2,
+            donchian_period: 20,
+            volume_surge_mult: dec!(1.30),
+            initial_stop_atr: dec!(2.2),
+            chandelier_atr: dec!(3.0),
+            breakeven_r: dec!(1.5),
+            time_stop_bars: 12,
+            regime_adx: dec!(20.0),
+            bear_stop_atr: Some(dec!(2.5)),
+            bear_tp_atr: Some(dec!(4.0)),
+            bear_maturity_bars: Some(48),
+            bear_entry_variant: Some("both".to_string()),
         },
     ]
 }
@@ -393,6 +472,10 @@ pub fn run_strategy_evolution(
         cfg.strategy.breakeven_r_mult = spec.breakeven_r;
         cfg.strategy.time_stop_bars = spec.time_stop_bars;
         cfg.strategy.regime_adx_threshold = spec.regime_adx;
+        if let Some(v) = spec.bear_stop_atr { cfg.strategy.bear_stop_atr = v; }
+        if let Some(v) = spec.bear_tp_atr { cfg.strategy.bear_tp_atr = v; }
+        if let Some(v) = spec.bear_maturity_bars { cfg.strategy.bear_maturity_bars = v; }
+        if let Some(v) = &spec.bear_entry_variant { cfg.strategy.bear_entry_variant = v.clone(); }
 
         let engine = BacktestEngine::new(cfg);
 
@@ -468,7 +551,7 @@ fn write_evolution_markdown(
     ));
     md.push_str("- **防过拟合 Walk-Forward 验证**：前 65% 为样本内（In-Sample），后 35% 为样本外盲测（Out-of-Sample），并单独核算最近 60 天实况净盈亏。\n\n");
 
-    md.push_str("## 一、 15 套生成策略生产数据实测盈亏总榜\n\n");
+    md.push_str("## 一、 生成策略生产数据实测盈亏总榜\n\n");
     md.push_str("| 排名 | 策略编号 | 策略名称与流派 | 全周期净利 (U) | 全周期收益率 | 样本内收益 | 样本外盲测净利 | 近60天实况净利 | 最大回撤 | 夏普比率 | 盈亏比(PF) | 胜率 | 交易数 |\n");
     md.push_str("| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |\n");
 

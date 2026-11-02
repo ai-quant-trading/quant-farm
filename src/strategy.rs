@@ -103,14 +103,16 @@ fn is_bull_pullback_continuation(candles: &[Candle], ema20: Decimal, ema50: Deci
 pub fn stop_atr_mult(cfg: &StrategyConfig) -> Decimal {
     match cfg.mode {
         StrategyMode::ChopMeanReversion => cfg.chop_mr_stop_atr,
+        StrategyMode::BearShort => cfg.bear_stop_atr,
         _ => cfg.initial_stop_atr_mult,
     }
 }
 
-/// 固定止盈 ATR 倍数（仅 MR 有；其余模式 ZERO = 禁用，维持纯移动止损口径与历史回测一致）
+/// 固定止盈 ATR 倍数（仅 MR/BearShort 有；其余模式 ZERO = 禁用，维持纯移动止损口径与历史回测一致）
 pub fn fixed_tp_atr_mult(cfg: &StrategyConfig) -> Decimal {
     match cfg.mode {
         StrategyMode::ChopMeanReversion => cfg.chop_mr_tp_atr,
+        StrategyMode::BearShort => cfg.bear_tp_atr,
         _ => Decimal::ZERO,
     }
 }
@@ -119,7 +121,16 @@ pub fn fixed_tp_atr_mult(cfg: &StrategyConfig) -> Decimal {
 pub fn live_tp_atr_mult(cfg: &StrategyConfig) -> Decimal {
     match cfg.mode {
         StrategyMode::ChopMeanReversion => cfg.chop_mr_tp_atr,
+        StrategyMode::BearShort => cfg.bear_tp_atr,
         _ => cfg.chandelier_atr_mult,
+    }
+}
+
+/// 各模式的风险缩放系数：BearShort 未经验证期按半风险（沿袭危机空单模板审慎原则），其余 1.0
+pub fn risk_scale_factor(cfg: &StrategyConfig) -> Decimal {
+    match cfg.mode {
+        StrategyMode::BearShort => dec!(0.5),
+        _ => Decimal::ONE,
     }
 }
 
@@ -244,6 +255,182 @@ fn scan_chop_mr_signals(
     signals
 }
 
+/// 计算BTC尾部连续空头排列（EMA50<EMA150 且 close<EMA150）的小时数——熊市成熟度。
+/// 治"9 小时噪音"病：只在确立的大熊市做空， episodic 短熊腿不接。
+/// 增量 EMA 一次线性扫出，O(n)，回测每根调用也轻量。
+fn btc_bear_maturity_bars(btc_candles: &[Candle]) -> usize {
+    let closes: Vec<Decimal> = btc_candles.iter().map(|c| c.close).collect();
+    if closes.len() < 150 {
+        return 0;
+    }
+    let k50 = dec!(2) / Decimal::from(51u32);
+    let k150 = dec!(2) / Decimal::from(151u32);
+    let mut e50 = closes[..50].iter().copied().sum::<Decimal>() / Decimal::from(50u32);
+    let mut e150 = closes[..150].iter().copied().sum::<Decimal>() / Decimal::from(150u32);
+    // 对齐状态序列：i 处为「截至第 i 根收盘」的空头排列判定（i 从 149 起）
+    let mut bear_flags: Vec<bool> = Vec::with_capacity(closes.len());
+    bear_flags.push(e50 < e150 && closes[149] < e150);
+    for i in 150..closes.len() {
+        e50 = closes[i] * k50 + e50 * (Decimal::ONE - k50);
+        e150 = closes[i] * k150 + e150 * (Decimal::ONE - k150);
+        bear_flags.push(e50 < e150 && closes[i] < e150);
+    }
+    // 从尾部数连续 true
+    let mut run = 0usize;
+    for f in bear_flags.iter().rev() {
+        if *f {
+            run += 1;
+        } else {
+            break;
+        }
+    }
+    run
+}
+
+/// 成熟熊市空头扫描：熊市成熟度门 + 危机护栏 (ATR 分位) + 两种入场变体。
+/// V1 顺势压破 (breakdown)：破 Donchian 下轨 + 放量 + 弱势币（截面动量最弱）。
+/// V2 拉升衰竭 (rejection)：反弹至 EMA20 附近 + 阴线拒绝 + 缩量（无人接盘的弱反弹）——
+/// 治验尸报告的核心死因「在放量破位高潮后卖在局部底」。
+fn scan_bear_short_signals(
+    universe_candles: &HashMap<String, &[Candle]>,
+    btc_candles: &[Candle],
+    cfg: &StrategyConfig,
+) -> Vec<SignalCandidate> {
+    // 门 1: 熊市成熟度——BTC 已连续空头排列 >= bear_maturity_bars 小时
+        if btc_bear_maturity_bars(btc_candles) < cfg.bear_maturity_bars {
+        return Vec::new();
+    }
+    // 门 2: 危机护栏——BTC ATR 分位过高（波动爆炸=轧空风险）时禁止新空 (书: Bear≠Crisis)
+    if cfg.bear_max_atr_percentile > Decimal::ZERO {
+        let series = atr_series(btc_candles, cfg.atr_period);
+        if let Some(idx) = btc_candles.len().checked_sub(1) {
+            if let Some(p) =
+                atr_percentile(btc_candles, &series, idx, cfg.atr_percentile_lookback)
+            {
+                if p >= cfg.bear_max_atr_percentile {
+                    return Vec::new();
+                }
+            }
+        }
+    }
+
+    let variant = cfg.bear_entry_variant.as_str();
+    let allow_breakdown = variant == "breakdown" || variant == "both";
+    let allow_rejection = variant == "rejection" || variant == "both";
+
+    let mut cands: Vec<(String, Decimal, Decimal)> = Vec::new(); // (symbol, |score|, atr)
+    for symbol in &cfg.universe {
+        if cfg.execution_blacklist.iter().any(|b| b == symbol) {
+            continue;
+        }
+        let candles = match universe_candles.get(symbol) {
+            Some(&c) if c.len() > cfg.donchian_period + 55 => c,
+            _ => continue,
+        };
+        let last_candle = match candles.last() {
+            Some(c) => c,
+            None => continue,
+        };
+        let prev_candles = &candles[..candles.len() - 1];
+        let cur_atr = match atr(candles, cfg.atr_period) {
+            Some(a) if a > Decimal::ZERO => a,
+            _ => continue,
+        };
+        let avg_vol = match avg_volume(prev_candles, cfg.donchian_period) {
+            Some(v) if v > Decimal::ZERO => v,
+            _ => continue,
+        };
+        let closes: Vec<Decimal> = candles.iter().map(|c| c.close).collect();
+        let ema20 = match ema(&closes, 20) {
+            Some(e) if e > Decimal::ZERO => e,
+            _ => continue,
+        };
+        let ema60 = match ema(&closes, 60) {
+            Some(e) if e > Decimal::ZERO => e,
+            _ => continue,
+        };
+        // 标的自身必须深陷空头结构：均线空头排列 + 价格在 EMA20 下方（顺势，不接高潮）
+        if ema20 >= ema60 || last_candle.close >= ema20 {
+            continue;
+        }
+        // 乖离闸门：不允许在暴跌末端追空（离均线太远的拉伸）
+        let bias = (last_candle.close - ema20).abs() / ema20;
+        if bias > cfg.max_bias_pct {
+            continue;
+        }
+
+        let triggered = if allow_breakdown {
+            // V1 顺势压破：破 20 期低点 + 放量确认（1.3×，砍掉旧臂反常的 1.69×）
+            if let Some(prev_low) = donchian_low(prev_candles, cfg.donchian_period) {
+                if last_candle.close < prev_low
+                    && last_candle.volume >= avg_vol * cfg.volume_surge_mult
+                {
+                    true
+                } else {
+                    allow_rejection && bear_rejection_setup(last_candle, &ema20, cur_atr, avg_vol, cfg)
+                }
+            } else {
+                allow_rejection && bear_rejection_setup(last_candle, &ema20, cur_atr, avg_vol, cfg)
+            }
+        } else {
+            allow_rejection && bear_rejection_setup(last_candle, &ema20, cur_atr, avg_vol, cfg)
+        };
+        if !triggered {
+            continue;
+        }
+
+        // 弱势优先：截面动量最弱（对 BTC 超额收益最负）的币优先做空
+        let score = compute_cross_sectional_score(candles, btc_candles)
+            .unwrap_or(Decimal::ZERO);
+        if score >= Decimal::ZERO {
+            continue; // 做空只选跑输大盘的标的
+        }
+        cands.push((symbol.clone(), score.abs(), cur_atr));
+    }
+
+    // 弱势排序（score.abs() 最大 = 超跌最多 = 最弱）取 top_k
+    cands.sort_by(|a, b| b.1.cmp(&a.1));
+    let mut signals = Vec::new();
+    for (symbol, weak, cur_atr) in cands.into_iter().take(cfg.top_k_momentum) {
+        let candles = match universe_candles.get(&symbol) {
+            Some(&c) => c,
+            None => continue,
+        };
+        let close = match candles.last() {
+            Some(c) => c.close,
+            None => continue,
+        };
+        let spec = SymbolSpec::default_for(&symbol);
+        let stop_mult = stop_atr_mult(cfg);
+        let proposed_stop = spec.round_price(close + cur_atr * stop_mult);
+        if proposed_stop > close {
+            signals.push(SignalCandidate {
+                symbol,
+                side: Side::Short,
+                score: weak,
+                signal_close: close,
+                proposed_stop,
+                atr_val: cur_atr,
+            });
+        }
+    }
+    signals
+}
+
+/// V2 拉升衰竭形态：价格反弹至 EMA20 附近 (±0.5×ATR) + 当根阴线拒绝 + 缩量
+fn bear_rejection_setup(
+    last: &Candle,
+    ema20: &Decimal,
+    cur_atr: Decimal,
+    avg_vol: Decimal,
+    cfg: &StrategyConfig,
+) -> bool {
+    let near_ema = (last.close - ema20).abs() <= cur_atr * dec!(0.5);
+    let red_candle = last.close < last.open;
+    let quiet_volume = last.volume < avg_vol * cfg.volume_surge_mult;
+    near_ema && red_candle && quiet_volume
+}
+
 pub fn scan_entry_signals(
     regime: MarketRegime,
     universe_candles: &HashMap<String, &[Candle]>,
@@ -256,6 +443,13 @@ pub fn scan_entry_signals(
             return scan_chop_mr_signals(universe_candles, cfg);
         }
         // Bull/Bear 是趋势的领地，MR 绝不出手（区间已破位）
+        return Vec::new();
+    }
+    // 成熟熊市空头模式：只在 Bear 状态出手，走独立扫描（成熟度门 + 危机护栏）
+    if cfg.mode == StrategyMode::BearShort {
+        if regime == MarketRegime::Bear {
+            return scan_bear_short_signals(universe_candles, btc_candles, cfg);
+        }
         return Vec::new();
     }
     if regime == MarketRegime::Chop {
@@ -377,6 +571,8 @@ pub fn scan_entry_signals(
                     }
                     // MR 模式在函数入口已分流到 scan_chop_mr_signals，趋势臂不可达
                     StrategyMode::ChopMeanReversion => false,
+                    // BearShort 模式在函数入口已分流到 scan_bear_short_signals，趋势臂不可达
+                    StrategyMode::BearShort => false,
                 };
 
                 if triggered {
@@ -466,17 +662,23 @@ pub fn update_position_on_bar_close(
         if regime != MarketRegime::Chop {
             return Some(ExitReason::RegimeFlip);
         }
+    } else if cfg.mode == StrategyMode::BearShort {
+        // 空头仓位属于熊市：大盘离开 Bear（含转 Chop——验尸报告确认 Bear→Chop 不解救是旧臂死因之一）
+        // 且浮盈不足 0.5R 时立即撤退，不吃熊市反弹的逆势回撤
+        if pos.side == Side::Short && regime != MarketRegime::Bear && current_r < dec!(0.5) {
+            return Some(ExitReason::RegimeFlip);
+        }
     } else if (pos.side == Side::Long && regime == MarketRegime::Bear && current_r < dec!(0.5))
         || (pos.side == Side::Short && regime == MarketRegime::Bull && current_r < dec!(0.5))
     {
         return Some(ExitReason::RegimeFlip);
     }
 
-    // 3. 时间止损（MR 用更短的专用窗口：均值回归不成立就走）
-    let time_stop_bars = if cfg.mode == StrategyMode::ChopMeanReversion {
-        cfg.chop_mr_time_stop_bars
-    } else {
-        cfg.time_stop_bars
+    // 3. 时间止损（MR/BearShort 用各自更短的专用窗口：不成立就走）
+    let time_stop_bars = match cfg.mode {
+        StrategyMode::ChopMeanReversion => cfg.chop_mr_time_stop_bars,
+        StrategyMode::BearShort => cfg.bear_time_stop_bars,
+        _ => cfg.time_stop_bars,
     };
     if pos.bars_held >= time_stop_bars && current_r < cfg.time_stop_min_r {
         return Some(ExitReason::TimeStop);

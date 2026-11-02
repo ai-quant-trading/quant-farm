@@ -996,7 +996,8 @@ impl SqlitePaperEngine {
             };
 
             if let Some(sizing) = risk_mgr.calculate_position_size(
-                cur_equity,
+                // 模式风险缩放：BearShort 未验证期半风险（书的新模块审慎原则）
+                cur_equity * crate::strategy::risk_scale_factor(strat),
                 fill_entry,
                 init_stop,
                 &spec,

@@ -55,6 +55,8 @@ pub enum StrategyMode {
     EnsembleComposite,
     /// 震荡期区间边缘均值回归 (Chop Mean Reversion: 下轨超卖买/上轨超买卖, 回到均值即止盈)
     ChopMeanReversion,
+    /// 成熟熊市空头 (Bear Short: 熊市确立后顺势/拉升衰竭做空, 非对称屏障, 破位即撤)
+    BearShort,
 }
 
 impl Default for StrategyMode {
@@ -72,6 +74,7 @@ impl std::fmt::Display for StrategyMode {
             StrategyMode::TrendPullback => write!(f, "TrendPullback (强势趋势回踩启动)"),
             StrategyMode::EnsembleComposite => write!(f, "EnsembleComposite (多因子融合策略)"),
             StrategyMode::ChopMeanReversion => write!(f, "ChopMeanReversion (震荡区间均值回归)"),
+            StrategyMode::BearShort => write!(f, "BearShort (成熟熊市空头)"),
         }
     }
 }
@@ -130,6 +133,26 @@ pub struct StrategyConfig {
     /// MR 专用时间止损（K 线根数），均值回归不成立就走，默认 8
     #[serde(default = "default_mr_time_stop")]
     pub chop_mr_time_stop_bars: usize,
+    // ---- BearShort 专用参数（其余模式完全忽略）----
+    /// 熊市成熟度门槛：BTC 尾部连续空头排列 (EMA50<EMA150 且 close<EMA150) 的最少小时数。
+    /// 治"9 小时噪音"病——只做确立的大熊市，默认 24
+    #[serde(default = "default_bear_maturity")]
+    pub bear_maturity_bars: usize,
+    /// 空头初始止损（×ATR），熊市反弹剧烈需宽于多头 2.2，默认 3.0
+    #[serde(default = "default_bear_stop")]
+    pub bear_stop_atr: Decimal,
+    /// 空头固定止盈（×ATR），书的非对称屏障（TP>SL），默认 4.0
+    #[serde(default = "default_bear_tp")]
+    pub bear_tp_atr: Decimal,
+    /// 空头时间止损（K 线根数），死空单不养，默认 12
+    #[serde(default = "default_bear_time_stop")]
+    pub bear_time_stop_bars: usize,
+    /// 入场变体: "breakdown"(顺势压破) / "rejection"(拉升衰竭) / "both"，默认 both
+    #[serde(default = "default_bear_variant")]
+    pub bear_entry_variant: String,
+    /// 危机护栏：BTC ATR 分位 >= 该值时禁止新空（波动爆炸=轧空风险），默认 95
+    #[serde(default = "default_bear_vol_cap")]
+    pub bear_max_atr_percentile: Decimal,
 }
 
 fn default_recent_move_window() -> u64 {
@@ -153,6 +176,25 @@ fn default_mr_tp() -> Decimal {
 }
 fn default_mr_time_stop() -> usize {
     8
+}
+
+fn default_bear_maturity() -> usize {
+    24
+}
+fn default_bear_stop() -> Decimal {
+    dec!(3.0)
+}
+fn default_bear_tp() -> Decimal {
+    dec!(4.0)
+}
+fn default_bear_time_stop() -> usize {
+    12
+}
+fn default_bear_variant() -> String {
+    "both".to_string()
+}
+fn default_bear_vol_cap() -> Decimal {
+    dec!(95)
 }
 
 fn default_atr_lookback() -> usize {

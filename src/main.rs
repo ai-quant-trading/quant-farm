@@ -293,8 +293,9 @@ async fn main() -> Result<()> {
                     "trend_pullback" => StrategyMode::TrendPullback,
                     "ensemble_composite" => StrategyMode::EnsembleComposite,
                     "chop_mean_reversion" => StrategyMode::ChopMeanReversion,
+                    "bear_short" => StrategyMode::BearShort,
                     other => anyhow::bail!(
-                        "未知策略模式: {} (可选: long_only_breakout / all_weather_breakout / volatility_squeeze / trend_pullback / ensemble_composite / chop_mean_reversion)",
+                        "未知策略模式: {} (可选: long_only_breakout / all_weather_breakout / volatility_squeeze / trend_pullback / ensemble_composite / chop_mean_reversion / bear_short)",
                         other
                     ),
                 };
