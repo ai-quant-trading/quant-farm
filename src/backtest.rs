@@ -161,8 +161,8 @@ impl BacktestEngine {
                         Side::Short => spec.round_price(bar_open * (Decimal::ONE - slip_rate)),
                     };
 
-                    // 根据真实开仓均价调整初始硬止损价
-                    let stop_dist = sig.atr_val * self.cfg.strategy.initial_stop_atr_mult;
+                    // 根据真实开仓均价调整初始硬止损价（倍数按模式：MR 紧凑止损）
+                    let stop_dist = sig.atr_val * crate::strategy::stop_atr_mult(&self.cfg.strategy);
                     let initial_stop = match sig.side {
                         Side::Long => spec.round_price(fill_entry - stop_dist),
                         Side::Short => spec.round_price(fill_entry + stop_dist),
@@ -173,6 +173,17 @@ impl BacktestEngine {
                     {
                         continue;
                     }
+
+                    // 固定目标价（仅 MR 模式 > 0：均值回归回到均值即离场；其余模式 ZERO 维持纯移动止损）
+                    let tp_mult = crate::strategy::fixed_tp_atr_mult(&self.cfg.strategy);
+                    let take_profit = if tp_mult > Decimal::ZERO {
+                        match sig.side {
+                            Side::Long => spec.round_price(fill_entry + sig.atr_val * tp_mult),
+                            Side::Short => spec.round_price(fill_entry - sig.atr_val * tp_mult),
+                        }
+                    } else {
+                        Decimal::ZERO
+                    };
 
                     // 调用 100U/200U 风控网关“以损定仓”计算器
                     if let Some(sizing) = risk_mgr.calculate_position_size(
@@ -202,6 +213,7 @@ impl BacktestEngine {
                             entry_time: current_ts,
                             entry_fee,
                             accumulated_funding: Decimal::ZERO,
+                            take_profit,
                         });
                     }
                 }
@@ -223,6 +235,33 @@ impl BacktestEngine {
                     }
                 };
                 let bar = &all_candles[&pos.symbol][c_idx];
+
+                // B0. 固定目标价止盈（仅 MR 模式挂出）：限价单语义——
+                // 盘中触及即按目标价成交；若开盘直接跳空越过目标价，按更优的开盘价成交
+                if pos.take_profit > Decimal::ZERO {
+                    let tp_hit = match pos.side {
+                        Side::Long => bar.high >= pos.take_profit,
+                        Side::Short => bar.low <= pos.take_profit,
+                    };
+                    if tp_hit {
+                        let raw_tp_fill = match pos.side {
+                            Side::Long => pos.take_profit.max(bar.open),
+                            Side::Short => pos.take_profit.min(bar.open),
+                        };
+                        let rec = Self::close_position(
+                            pos,
+                            raw_tp_fill,
+                            current_ts,
+                            ExitReason::TakeProfit,
+                            fee_rate,
+                            slip_rate,
+                            &mut cash_balance,
+                            &mut risk_mgr,
+                        );
+                        trades.push(rec);
+                        continue;
+                    }
+                }
 
                 // B1. 检查盘中最低价/最高价是否触及服务端止损单 (STOP_MARKET)
                 let stop_hit = match pos.side {

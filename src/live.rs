@@ -263,6 +263,7 @@ pub async fn verify_full_trading_lifecycle(cfg: &AppConfig, data_mgr: &DataManag
         entry_time: Utc::now().timestamp_millis(),
         entry_fee: sizing.approved_qty * fill_px * cfg.costs.taker_fee_rate,
         accumulated_funding: Decimal::ZERO,
+        take_profit: Decimal::ZERO,
     };
 
     let pump_candle = Candle {
@@ -484,6 +485,7 @@ pub async fn open_live_simulated_position(
         entry_time: Utc::now().timestamp_millis(),
         entry_fee,
         accumulated_funding: Decimal::ZERO,
+        take_profit: Decimal::ZERO,
     });
 
     ledger.save(&gateway.ledger_path)?;
@@ -871,6 +873,7 @@ pub async fn run_trading_cycle(
                     entry_time: now_ts,
                     entry_fee,
                     accumulated_funding: Decimal::ZERO,
+                    take_profit: Decimal::ZERO,
                 });
 
                 notifier
@@ -1293,6 +1296,7 @@ pub async fn run_continuous_production_stream(
                         entry_time: current_ts,
                         entry_fee,
                         accumulated_funding: Decimal::ZERO,
+                        take_profit: Decimal::ZERO,
                     });
                 }
             }

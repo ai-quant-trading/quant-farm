@@ -235,6 +235,12 @@ enum Commands {
         /// 开仓护圈 (bps)：落地价偏离决策价超此值模拟 IOC 限价放弃（0 = 关闭）
         #[arg(long, default_value = "30")]
         max_fill_deviation_bps: String,
+        /// 单窗口回放整个 tick 覆盖区间（策略级连续测试，不选压力窗口）
+        #[arg(long, default_value_t = false)]
+        full_range: bool,
+        /// 禁用种子持仓（纯信号驱动，检验策略自身成交）
+        #[arg(long, default_value_t = false)]
+        no_seed: bool,
     },
 }
 
@@ -286,8 +292,9 @@ async fn main() -> Result<()> {
                     "volatility_squeeze" => StrategyMode::VolatilitySqueeze,
                     "trend_pullback" => StrategyMode::TrendPullback,
                     "ensemble_composite" => StrategyMode::EnsembleComposite,
+                    "chop_mean_reversion" => StrategyMode::ChopMeanReversion,
                     other => anyhow::bail!(
-                        "未知策略模式: {} (可选: long_only_breakout / all_weather_breakout / volatility_squeeze / trend_pullback / ensemble_composite)",
+                        "未知策略模式: {} (可选: long_only_breakout / all_weather_breakout / volatility_squeeze / trend_pullback / ensemble_composite / chop_mean_reversion)",
                         other
                     ),
                 };
@@ -576,6 +583,8 @@ async fn main() -> Result<()> {
             report,
             synthetic,
             max_fill_deviation_bps,
+            full_range,
+            no_seed,
         } => {
             let lat_vec: Vec<i64> = latencies
                 .split(',')
@@ -597,6 +606,8 @@ async fn main() -> Result<()> {
                 &report,
                 synthetic,
                 collar,
+                full_range,
+                no_seed,
             )
             .await?;
         }

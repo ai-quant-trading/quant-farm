@@ -53,6 +53,8 @@ pub enum StrategyMode {
     TrendPullback,
     /// 多策略融合共振 (Ensemble: 突破 + 波动率收敛 + 动量回踩)
     EnsembleComposite,
+    /// 震荡期区间边缘均值回归 (Chop Mean Reversion: 下轨超卖买/上轨超买卖, 回到均值即止盈)
+    ChopMeanReversion,
 }
 
 impl Default for StrategyMode {
@@ -69,6 +71,7 @@ impl std::fmt::Display for StrategyMode {
             StrategyMode::VolatilitySqueeze => write!(f, "VolatilitySqueeze (波动率收敛爆发)"),
             StrategyMode::TrendPullback => write!(f, "TrendPullback (强势趋势回踩启动)"),
             StrategyMode::EnsembleComposite => write!(f, "EnsembleComposite (多因子融合策略)"),
+            StrategyMode::ChopMeanReversion => write!(f, "ChopMeanReversion (震荡区间均值回归)"),
         }
     }
 }
@@ -108,10 +111,48 @@ pub struct StrategyConfig {
     /// 波动闸门的回看窗口（秒，默认 10）
     #[serde(default = "default_recent_move_window")]
     pub recent_move_window_secs: u64,
+    // ---- ChopMeanReversion 专用参数（其余模式完全忽略）----
+    /// 有效区间宽度下限（Donchian 宽度/价格），过窄 = 死水无肉
+    #[serde(default = "default_mr_range_min")]
+    pub chop_mr_range_min_pct: Decimal,
+    /// 有效区间宽度上限，过宽 = 已是趋势不是震荡
+    #[serde(default = "default_mr_range_max")]
+    pub chop_mr_range_max_pct: Decimal,
+    /// 均值拉伸入场阈值（|close − EMA20| / ATR），默认 1.5
+    #[serde(default = "default_mr_stretch")]
+    pub chop_mr_stretch_atr: Decimal,
+    /// 紧凑初始止损（×ATR），默认 1.2（趋势模式仍用 initial_stop_atr_mult）
+    #[serde(default = "default_mr_stop")]
+    pub chop_mr_stop_atr: Decimal,
+    /// 固定止盈目标（×ATR，回到均值附近），默认 1.0
+    #[serde(default = "default_mr_tp")]
+    pub chop_mr_tp_atr: Decimal,
+    /// MR 专用时间止损（K 线根数），均值回归不成立就走，默认 8
+    #[serde(default = "default_mr_time_stop")]
+    pub chop_mr_time_stop_bars: usize,
 }
 
 fn default_recent_move_window() -> u64 {
     10
+}
+
+fn default_mr_range_min() -> Decimal {
+    dec!(0.03)
+}
+fn default_mr_range_max() -> Decimal {
+    dec!(0.12)
+}
+fn default_mr_stretch() -> Decimal {
+    dec!(1.5)
+}
+fn default_mr_stop() -> Decimal {
+    dec!(1.2)
+}
+fn default_mr_tp() -> Decimal {
+    dec!(1.0)
+}
+fn default_mr_time_stop() -> usize {
+    8
 }
 
 fn default_atr_lookback() -> usize {

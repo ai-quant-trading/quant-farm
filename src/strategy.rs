@@ -99,12 +99,165 @@ fn is_bull_pullback_continuation(candles: &[Candle], ema20: Decimal, ema50: Deci
 }
 
 /// 第三层与第四层漏斗：支持 5 种策略模式生成信号
+/// 各模式的初始止损 ATR 倍数（MR 用紧凑止损，趋势模式沿用 initial_stop_atr_mult）
+pub fn stop_atr_mult(cfg: &StrategyConfig) -> Decimal {
+    match cfg.mode {
+        StrategyMode::ChopMeanReversion => cfg.chop_mr_stop_atr,
+        _ => cfg.initial_stop_atr_mult,
+    }
+}
+
+/// 固定止盈 ATR 倍数（仅 MR 有；其余模式 ZERO = 禁用，维持纯移动止损口径与历史回测一致）
+pub fn fixed_tp_atr_mult(cfg: &StrategyConfig) -> Decimal {
+    match cfg.mode {
+        StrategyMode::ChopMeanReversion => cfg.chop_mr_tp_atr,
+        _ => Decimal::ZERO,
+    }
+}
+
+/// 实盘/paper 引擎的挂单止盈倍数（MR 用 chop_mr_tp_atr；其余模式沿用 chandelier_atr_mult 不变）
+pub fn live_tp_atr_mult(cfg: &StrategyConfig) -> Decimal {
+    match cfg.mode {
+        StrategyMode::ChopMeanReversion => cfg.chop_mr_tp_atr,
+        _ => cfg.chandelier_atr_mult,
+    }
+}
+
+/// Chop 均值回归扫描：区间边缘 + 均值拉伸 + 缩量（放量=突破能量，MR 不接飞刀）。
+/// 与趋势扫描完全独立：不用截面动量排名、不用乖离闸门（拉伸本身就是入场理由）。
+fn scan_chop_mr_signals(
+    universe_candles: &HashMap<String, &[Candle]>,
+    cfg: &StrategyConfig,
+) -> Vec<SignalCandidate> {
+    let mut cands: Vec<(String, Side, Decimal, Decimal)> = Vec::new(); // (symbol, side, stretch_z, atr)
+
+    for symbol in &cfg.universe {
+        if cfg.execution_blacklist.iter().any(|b| b == symbol) {
+            continue;
+        }
+        let candles = match universe_candles.get(symbol) {
+            Some(&c) if c.len() > cfg.donchian_period + 55 => c,
+            _ => continue,
+        };
+        let last_candle = match candles.last() {
+            Some(c) => c,
+            None => continue,
+        };
+        let prev_candles = &candles[..candles.len() - 1];
+
+        let cur_atr = match atr(candles, cfg.atr_period) {
+            Some(a) if a > Decimal::ZERO => a,
+            _ => continue,
+        };
+        let avg_vol = match avg_volume(prev_candles, cfg.donchian_period) {
+            Some(v) if v > Decimal::ZERO => v,
+            _ => continue,
+        };
+        let closes: Vec<Decimal> = candles.iter().map(|c| c.close).collect();
+        let ema20 = match ema(&closes, 20) {
+            Some(e) if e > Decimal::ZERO => e,
+            _ => continue,
+        };
+        let dc_high = match donchian_high(prev_candles, cfg.donchian_period) {
+            Some(v) => v,
+            None => continue,
+        };
+        let dc_low = match donchian_low(prev_candles, cfg.donchian_period) {
+            Some(v) => v,
+            None => continue,
+        };
+
+        // 区间有效性：Donchian 宽度占价格比例必须在 [min, max] —— 过窄是死水，过宽已是趋势
+        let range_width = (dc_high - dc_low) / last_candle.close;
+        if range_width < cfg.chop_mr_range_min_pct || range_width > cfg.chop_mr_range_max_pct {
+            continue;
+        }
+
+        // 均值拉伸 z 值（以 ATR 为单位）：负 = 超卖偏离，正 = 超买偏离
+        if ema20 <= Decimal::ZERO || cur_atr <= Decimal::ZERO {
+            continue;
+        }
+        let stretch = (last_candle.close - ema20) / cur_atr;
+
+        // 缩量确认：放量意味着区间即将被突破（无论是谁的能量），MR 此时不接飞刀
+        let quiet_volume = last_candle.volume < avg_vol * cfg.volume_surge_mult;
+
+        // 贴近区间下轨 + 深度超卖拉伸 + 缩量 → 做多博回归
+        let near_low = last_candle.close <= dc_low + cur_atr * dec!(0.15);
+        if quiet_volume && near_low && stretch <= -cfg.chop_mr_stretch_atr {
+            cands.push((symbol.clone(), Side::Long, -stretch, cur_atr));
+            continue;
+        }
+
+        // 贴近区间上轨 + 深度超买拉伸 + 缩量 → 做空博回归
+        let near_high = last_candle.close >= dc_high - cur_atr * dec!(0.15);
+        if quiet_volume && near_high && stretch >= cfg.chop_mr_stretch_atr {
+            cands.push((symbol.clone(), Side::Short, stretch, cur_atr));
+        }
+    }
+
+    // 拉伸最深者优先；每边最多 top_k_momentum 个（多空各自计数）
+    cands.sort_by(|a, b| b.2.cmp(&a.2));
+    let mut long_taken = 0usize;
+    let mut short_taken = 0usize;
+    let mut signals = Vec::new();
+    for (symbol, side, stretch_z, cur_atr) in cands {
+        let slot_ok = if side == Side::Long {
+            long_taken < cfg.top_k_momentum
+        } else {
+            short_taken < cfg.top_k_momentum
+        };
+        if !slot_ok {
+            continue;
+        }
+        let candles = universe_candles.get(&symbol).copied().unwrap_or(&[]);
+        let close = match candles.last() {
+            Some(c) => c.close,
+            None => continue,
+        };
+        let spec = SymbolSpec::default_for(&symbol);
+        let stop_mult = stop_atr_mult(cfg);
+        let proposed_stop = match side {
+            Side::Long => spec.round_price(close - cur_atr * stop_mult),
+            Side::Short => spec.round_price(close + cur_atr * stop_mult),
+        };
+        let stop_valid = match side {
+            Side::Long => proposed_stop > Decimal::ZERO && proposed_stop < close,
+            Side::Short => proposed_stop > close,
+        };
+        if stop_valid {
+            if side == Side::Long {
+                long_taken += 1;
+            } else {
+                short_taken += 1;
+            }
+            signals.push(SignalCandidate {
+                symbol,
+                side,
+                score: stretch_z,
+                signal_close: close,
+                proposed_stop,
+                atr_val: cur_atr,
+            });
+        }
+    }
+    signals
+}
+
 pub fn scan_entry_signals(
     regime: MarketRegime,
     universe_candles: &HashMap<String, &[Candle]>,
     btc_candles: &[Candle],
     cfg: &StrategyConfig,
 ) -> Vec<SignalCandidate> {
+    // 震荡均值回归模式：Chop 状态下走独立的区间边缘扫描（不穿越趋势排名/乖离闸门）
+    if cfg.mode == StrategyMode::ChopMeanReversion {
+        if regime == MarketRegime::Chop {
+            return scan_chop_mr_signals(universe_candles, cfg);
+        }
+        // Bull/Bear 是趋势的领地，MR 绝不出手（区间已破位）
+        return Vec::new();
+    }
     if regime == MarketRegime::Chop {
         return Vec::new();
     }
@@ -222,6 +375,8 @@ pub fn scan_entry_signals(
                     StrategyMode::EnsembleComposite => {
                         is_donchian || is_pullback || is_funding_squeeze
                     }
+                    // MR 模式在函数入口已分流到 scan_chop_mr_signals，趋势臂不可达
+                    StrategyMode::ChopMeanReversion => false,
                 };
 
                 if triggered {
@@ -306,14 +461,24 @@ pub fn update_position_on_bar_close(
     };
 
     // 2. 大盘状态逆转平仓保护
-    if (pos.side == Side::Long && regime == MarketRegime::Bear && current_r < dec!(0.5))
+    //    MR 仓位属于震荡：大盘一旦离开 Chop（趋势启动=区间破位），无论盈亏立即离场防压路机
+    if cfg.mode == StrategyMode::ChopMeanReversion {
+        if regime != MarketRegime::Chop {
+            return Some(ExitReason::RegimeFlip);
+        }
+    } else if (pos.side == Side::Long && regime == MarketRegime::Bear && current_r < dec!(0.5))
         || (pos.side == Side::Short && regime == MarketRegime::Bull && current_r < dec!(0.5))
     {
         return Some(ExitReason::RegimeFlip);
     }
 
-    // 3. 时间止损
-    if pos.bars_held >= cfg.time_stop_bars && current_r < cfg.time_stop_min_r {
+    // 3. 时间止损（MR 用更短的专用窗口：均值回归不成立就走）
+    let time_stop_bars = if cfg.mode == StrategyMode::ChopMeanReversion {
+        cfg.chop_mr_time_stop_bars
+    } else {
+        cfg.time_stop_bars
+    };
+    if pos.bars_held >= time_stop_bars && current_r < cfg.time_stop_min_r {
         return Some(ExitReason::TimeStop);
     }
 

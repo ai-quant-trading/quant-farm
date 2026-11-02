@@ -126,6 +126,8 @@ pub enum ExitReason {
     RegimeFlip,
     CircuitBreaker,
     EndOfBacktest,
+    /// 固定目标价止盈（均值回归模式：回到均值即离场）
+    TakeProfit,
 }
 
 impl std::fmt::Display for ExitReason {
@@ -138,6 +140,7 @@ impl std::fmt::Display for ExitReason {
             ExitReason::RegimeFlip => write!(f, "大盘转势平仓 (Regime Flip)"),
             ExitReason::CircuitBreaker => write!(f, "风控熔断强平 (Circuit Breaker)"),
             ExitReason::EndOfBacktest => write!(f, "回测结束结算 (End of Test)"),
+            ExitReason::TakeProfit => write!(f, "固定目标价止盈 (Take Profit)"),
         }
     }
 }
@@ -158,6 +161,9 @@ pub struct Position {
     pub entry_time: i64,
     pub entry_fee: Decimal,
     pub accumulated_funding: Decimal,
+    /// 固定目标价（ZERO = 禁用，趋势模式维持纯移动止损口径不变）
+    #[serde(default)]
+    pub take_profit: Decimal,
 }
 
 impl Position {

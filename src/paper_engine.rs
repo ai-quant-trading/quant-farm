@@ -485,6 +485,7 @@ impl SqlitePaperEngine {
                             entry_time: current_ts,
                             entry_fee,
                             accumulated_funding: Decimal::ZERO,
+                            take_profit: Decimal::ZERO,
                         });
                     }
                 }
@@ -936,6 +937,7 @@ impl SqlitePaperEngine {
                 entry_time: 0,
                 entry_fee: dp.entry_fee,
                 accumulated_funding: Decimal::ZERO,
+                take_profit: dp.take_profit,
             })
             .collect();
 
@@ -977,8 +979,9 @@ impl SqlitePaperEngine {
             } else {
                 q.bid_price
             };
-            let stop_dist = *cur_atr * strat.initial_stop_atr_mult;
-            let tp_dist = *cur_atr * strat.chandelier_atr_mult;
+            // 倍数按模式取值（MR 紧凑止损 + 均值目标价；趋势模式沿用原参数，行为不变）
+            let stop_dist = *cur_atr * crate::strategy::stop_atr_mult(strat);
+            let tp_dist = *cur_atr * crate::strategy::live_tp_atr_mult(strat);
 
             let (init_stop, take_profit) = if side_str == "LONG" {
                 (
@@ -1014,6 +1017,7 @@ impl SqlitePaperEngine {
                     entry_time: 0,
                     entry_fee: Decimal::ZERO,
                     accumulated_funding: Decimal::ZERO,
+                    take_profit,
                 });
                 decisions.push(LiveEntryDecision {
                     symbol: sym.clone(),

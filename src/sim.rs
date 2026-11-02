@@ -1336,6 +1336,8 @@ pub async fn run_replay_stress(
     report_path: &str,
     synthetic: bool,
     collar_bps: Decimal,
+    full_range: bool,
+    no_seed: bool,
 ) -> Result<()> {
     let tick_db = TickDatabase::open(tick_db_path)?;
     let symbol = cfg.strategy.benchmark_symbol.clone();
@@ -1348,7 +1350,19 @@ pub async fn run_replay_stress(
     };
 
     let btc_1h = data_mgr.load_or_fetch_candles(&symbol, 3000, false).await?;
-    let windows = scan_stress_windows(&btc_1h, tick_min, tick_max, top_windows, 24);
+    let windows = if full_range {
+        // 全区间单窗口：整个 tick 覆盖期作为一局连续回放（策略级测试用）
+        vec![ReplayWindow {
+            label: "full_range".to_string(),
+            kind: WindowKind::HighVol,
+            event_ts: (tick_min + tick_max) / 2,
+            start_ms: tick_min + 3_600_000,
+            end_ms: tick_max,
+            magnitude_pct: Decimal::ZERO,
+        }]
+    } else {
+        scan_stress_windows(&btc_1h, tick_min, tick_max, top_windows, 24)
+    };
     if windows.is_empty() {
         anyhow::bail!("tick 覆盖范围内未找到可用压力窗口");
     }
@@ -1427,7 +1441,7 @@ pub async fn run_replay_stress(
                 lat,
                 poll_secs,
                 spread_bps,
-                true,
+                !no_seed,
                 false,
                 collar_bps,
             )?;

@@ -53,6 +53,7 @@ fn test_e2e_multi_position_and_leverage_caps() {
         entry_time: 1000,
         entry_fee: dec!(0.0325),
         accumulated_funding: Decimal::ZERO,
+            take_profit: Decimal::ZERO,
     };
 
     // 第 2 仓：XRPUSDT @ 1.00, 止损 @ 0.98
@@ -84,6 +85,7 @@ fn test_e2e_multi_position_and_leverage_caps() {
         entry_time: 1000,
         entry_fee: dec!(0.0325),
         accumulated_funding: Decimal::ZERO,
+            take_profit: Decimal::ZERO,
     };
 
     // 第 3 仓：已持有 2 个仓位，达到 100U 模式 max_concurrent_positions=2 上限，必须返回 None 拒绝开仓！
@@ -181,6 +183,7 @@ fn test_e2e_position_lifecycle_transitions() {
         entry_time: 1000,
         entry_fee: dec!(0.025),
         accumulated_funding: Decimal::ZERO,
+            take_profit: Decimal::ZERO,
     };
 
     // 1. 价格涨至 106.5 (+1.625R >= 1.5R) -> 应激活保本并启动吊灯移动止盈
