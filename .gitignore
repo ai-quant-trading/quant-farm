@@ -1,0 +1,21 @@
+# Rust 编译产物
+/target/
+
+# 运行时数据：行情缓存、生产账本、秒级 tick 库、状态文件（可随时重新下载/生成）
+data/*.json
+data/*.db
+data/*.db-shm
+data/*.db-wal
+data/live_state.json
+
+# 日志
+logs/
+
+# 环境变量（真实 API Key 永不入库）
+.env
+
+# macOS
+.DS_Store
+
+# ZCode 会话工具文件
+.zcode/

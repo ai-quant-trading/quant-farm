@@ -1,0 +1,59 @@
+[account]
+initial_equity = "100.0"
+reserve_ratio = "0.25"
+
+[risk]
+risk_per_trade_pct = "0.020"
+reduced_risk_per_trade_pct = "0.010"
+max_single_notional_pct = "0.65"
+min_single_notional_usd = "12.0"
+max_concurrent_positions = 2
+max_account_leverage = "1.5"
+daily_loss_limit_pct = "0.05"
+rolling_7d_drawdown_pct = "0.10"
+max_consecutive_losses = 5
+max_drawdown_halt_pct = "0.20"
+
+[costs]
+taker_fee_rate = "0.0005"
+slippage_rate = "0.0005"
+default_funding_rate_8h = "0.0001"
+
+[strategy]
+mode = "long_only_breakout"
+benchmark_symbol = "BTCUSDT"
+universe = [
+    "SOLUSDT",
+    "ETHUSDT",
+    "BNBUSDT",
+    "XRPUSDT",
+    "DOGEUSDT",
+    "ADAUSDT",
+    "AVAXUSDT",
+    "LINKUSDT",
+    "SUIUSDT",
+]
+execution_blacklist = [
+    "DOGEUSDT",
+    "ADAUSDT",
+]
+top_k_momentum = 3
+donchian_period = 20
+atr_period = 14
+volume_surge_mult = "1.30"
+max_bias_pct = "0.08"
+initial_stop_atr_mult = "2.2"
+chandelier_atr_mult = "3.0"
+breakeven_r_mult = "1.5"
+time_stop_bars = 16
+time_stop_min_r = "0.4"
+regime_adx_threshold = "20.0"
+# 波动率过滤器（研究开关，默认关闭）：>0 时仅当开仓 ATR/价格 分位 >= 阈值才允许开仓。
+# 验证结论见 reports/volatility_filter_validation.md：
+# 最近 5750h 样本显著有效，但更早 6000h 样本无差异，证据不足以上线，故保持 0。
+min_atr_percentile = "0"
+atr_percentile_lookback = 200
+# 下单前波动闸门：最近 10 秒价格振幅 > 30bps (0.3%) 时放弃开仓（闪崩/插针进行中不追单）。
+# 只用决策时刻的过去数据；A/B 验证见 reports/replay_stress.md（级联情景护圈对比）。
+max_recent_move_bps = "30"
+recent_move_window_secs = 10
