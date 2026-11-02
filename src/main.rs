@@ -209,6 +209,24 @@ enum Commands {
         #[arg(long, default_value = "data/ticks_1s.db")]
         db_path: String,
     },
+    /// Monte Carlo 鲁棒性检验：Bootstrap 重抽 + 成本压力 + 参数扰动 ±20% + Bonferroni 校正
+    MonteCarlo {
+        /// 回测 K 线根数
+        #[arg(short, long, default_value_t = 9000)]
+        bars: usize,
+        /// Bootstrap 重抽样次数
+        #[arg(short, long, default_value_t = 2000)]
+        sims: usize,
+        /// 历史已测试的策略变体总数（Bonferroni 校正用）
+        #[arg(long, default_value_t = 40)]
+        n_tested: usize,
+        /// 随机种子（可复现）
+        #[arg(long, default_value_t = 42)]
+        seed: u64,
+        /// Markdown 报告输出路径
+        #[arg(short, long, default_value = "reports/monte_carlo_report.md")]
+        report: String,
+    },
     /// 策略健康监测：滚动实盘表现 vs 现场重算的回测基线，四监测器分级早警边际衰减
     Health {
         /// 生产账本数据库路径
@@ -573,6 +591,16 @@ async fn main() -> Result<()> {
         Commands::DrillBlackSwan { db_path } => {
             let engine = SqlitePaperEngine::new(cfg, &db_path)?;
             engine.run_black_swan_drill(&data_mgr).await?;
+        }
+        Commands::MonteCarlo {
+            bars,
+            sims,
+            n_tested,
+            seed,
+            report,
+        } => {
+            coin_ai::monte_carlo::run_monte_carlo(&cfg, &data_mgr, bars, sims, n_tested, seed, &report)
+                .await?;
         }
         Commands::Health { db_path, report } => {
             let hr = coin_ai::health::run_health_check(&cfg, &db_path, &data_mgr).await?;

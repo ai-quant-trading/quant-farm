@@ -12,6 +12,7 @@ pub mod paper_engine;
 pub mod regime;
 pub mod risk;
 pub mod health;
+pub mod monte_carlo;
 pub mod sim;
 pub mod tick_db;
 pub mod stats;
