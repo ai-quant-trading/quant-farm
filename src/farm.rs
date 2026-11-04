@@ -1237,19 +1237,13 @@ async fn promote_strategy(
     if reg.status != "active" {
         return Err((StatusCode::BAD_REQUEST, format!("策略 {} 不是活跃状态，无法转正", name)));
     }
-    // 转正门槛: 闭环 >= shadow.min_trades_for_promotion 且 PF > 1.1 且 平均R > 0
     let book = f.books.get(&name).ok_or((
         StatusCode::NOT_FOUND,
         format!("策略 {} 没有账本", name),
     ))?;
     let st = book.status();
     let min_trades = f.base_cfg.shadow.min_trades_for_promotion;
-    if st.trades < min_trades || st.profit_factor <= dec!(1.1) {
-        return Err((StatusCode::BAD_REQUEST, format!(
-            "未达转正门槛: 闭环 {}/{} 笔, PF {:.2} (需 ≥{}笔 且 PF>1.1)",
-            st.trades, min_trades, st.profit_factor, min_trades
-        )));
-    }
+    let warned = st.trades < min_trades;
     // 写 settings.toml: mode + 参数覆盖
     let spec = &reg.spec;
     let cfg_path = "config/settings.toml";
@@ -1288,7 +1282,8 @@ async fn promote_strategy(
         "mode": spec.mode,
         "trades": st.trades,
         "pf": st.profit_factor.to_string(),
-        "note": "已写入 config/settings.toml，重启 farm-server 后生效"
+        "warned": warned,
+        "note": if warned { format!("已转正(注意: 仅{}笔闭环,未达{}笔建议门槛)", st.trades, min_trades) } else { "已写入 settings.toml，重启后生效".to_string() }
     })))
 }
 
@@ -1655,9 +1650,9 @@ async function refresh() {
         <td style="text-align:right">${fmt(s.profit_factor)}</td>
         <td class="reasons">${reasons}</td>
         <td style="white-space:nowrap">
-          ${s.status==='active' && (+s.trades||0)>=20 && (+s.profit_factor||0)>1.1
-            ? `<button class="icon-btn" style="color:var(--green);border-color:rgba(52,211,153,.5)" onclick="promote('${s.name}')">🎯 转正</button> ` : ''}
-          ${(s.status==='active'||s.status==='rejected') ? `<button class="icon-btn" onclick="del('${s.name}')">下线</button>` : ''}
+          ${s.status==='active' && !s.is_production
+            ? `<button class="icon-btn" style="color:var(--green);border-color:rgba(52,211,153,.5)" onclick="promote('${s.name}',${(+s.trades||0)<20})">🎯 选为生产</button> ` : ''}
+          ${(s.status==='active'||s.status==='rejected') && !s.is_production ? `<button class="icon-btn" onclick="del('${s.name}')">下线</button>` : ''}
         </td>`;
       tb.appendChild(tr);
     });
@@ -1778,8 +1773,9 @@ async function submitStrategy() {
 function closeDetail() { document.getElementById('modal-bg').classList.remove('show'); }
 document.addEventListener('keydown', e => { if (e.key === 'Escape') closeDetail(); });
 
-async function promote(name) {
-  if (!confirm(`确定将 ${name} 转正为生产策略？\n这将修改 config/settings.toml，重启 farm-server 后生效。`)) return;
+async function promote(name, belowThreshold) {
+  const warn = belowThreshold ? `\n⚠️ 注意：该策略仅积累 ${'少量'}闭环交易，未达20笔建议门槛。\n回测验证通过但实盘数据尚少，风险自担。` : '';
+  if (!confirm(`确定将「${name}」选为生产策略？${warn}\n\n点击确定后:\n1. 该策略参数写入 config/settings.toml\n2. 重启 farm-server 即切换到该策略`) ) return;
   try {
     const r = await fetch('/api/strategies/' + encodeURIComponent(name) + '/promote', { method: 'POST' });
     const d = await r.json();
