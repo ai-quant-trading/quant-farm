@@ -1202,15 +1202,23 @@ async fn strategy_detail(
         }
         return Err((StatusCode::NOT_FOUND, "生产账本尚未就绪".to_string()));
     }
-    let book = f.books.get(&name).ok_or((
-        StatusCode::NOT_FOUND,
-        format!("策略 {} 不存在或未激活", name),
-    ))?;
+    // 被拒/归档条目：没有账本但可以查看验证报告与参数
     let reg = f.registry.iter().find(|r| r.spec.name == name);
+    let (book, curve, trades) = match f.books.get(&name) {
+        Some(b) => (
+            Some(b.status()),
+            curve_json(&b.equity_curve(2000)),
+            b.recent_trades_json(20),
+        ),
+        None => (None, serde_json::json!([]), Vec::new()),
+    };
+    if book.is_none() && reg.is_none() {
+        return Err((StatusCode::NOT_FOUND, format!("策略 {} 不存在", name)));
+    }
     Ok(Json(serde_json::json!({
-        "status": book.status(),
-        "curve": curve_json(&book.equity_curve(2000)),
-        "trades": book.recent_trades_json(20),
+        "status": book.unwrap_or_default(),
+        "curve": curve,
+        "trades": trades,
         "validation": reg.and_then(|r| r.validation.clone()),
         "spec": reg.map(|r| r.spec.clone()),
     })))
