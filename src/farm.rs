@@ -922,7 +922,6 @@ textarea { font-family: "SF Mono",ui-monospace,Menlo,monospace; font-size: 12px;
 #msg.show { padding: 12px 14px; border: 1px solid var(--border); background: rgba(2,6,17,.5); }
 #msg.ok { border-color: rgba(52,211,153,.4); color: var(--green); }
 #msg.err { border-color: rgba(248,113,113,.4); color: var(--red); }
-#curlbox { display: none; margin-top: 10px; background: rgba(2,6,17,.7); border: 1px solid var(--border); padding: 12px; border-radius: 10px; overflow-x: auto; font-size: 11.5px; font-family: "SF Mono",ui-monospace,Menlo,monospace; color: #a5b4fc; }
 
 /* ---------- leaderboard ---------- */
 .board-card { background: var(--card); border: 1px solid var(--border); border-radius: 16px; overflow: hidden; }
@@ -1008,11 +1007,8 @@ footer a:hover { color: var(--blue); }
 }</textarea></div>
     <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">
       <button class="btn" id="submitBtn" onclick="submitStrategy()">🚀 提交并验证</button>
-      <button class="btn ghost" onclick="copyCurl()">📋 复制 curl</button>
-      <button class="btn ghost" onclick="fillCurl()">显示 curl</button>
     </div>
     <div id="msg"></div>
-    <pre id="curlbox"></pre>
   </div>
 
   <div>
@@ -1186,19 +1182,6 @@ async function submitStrategy() {
   finally { btn.disabled = false; btn.textContent = '🚀 提交并验证'; }
 }
 
-function buildCurl() {
-  return "curl -X POST http://<服务器>:8787/api/strategies -H 'Content-Type: application/json' -d '" + JSON.stringify(currentSpec()) + "'";
-}
-function fillCurl() {
-  const box = document.getElementById('curlbox');
-  box.style.display = 'block';
-  try { box.textContent = buildCurl(); } catch (e) { box.textContent = '参数 JSON 有误: ' + e; }
-}
-function copyCurl() {
-  try {
-    navigator.clipboard.writeText(buildCurl()).then(() => toast('📋 curl 命令已复制'), fillCurl);
-  } catch (e) { fillCurl(); }
-}
 async function del(name) {
   await fetch('/api/strategies/' + name, { method: 'DELETE' });
   toast('已下线 ' + name);
