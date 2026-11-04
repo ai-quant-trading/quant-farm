@@ -1294,9 +1294,8 @@ h2.sec .num { background: var(--grad); color: white; width: 20px; height: 20px; 
 .tpl:hover .fill { opacity: 1; color: var(--blue); }
 
 /* ---------- form card ---------- */
-.grid2 { display: grid; grid-template-columns: 420px 1fr; gap: 18px; align-items: start; }
-@media (max-width: 980px) { .grid2 { grid-template-columns: 1fr; } }
-.card { background: var(--card); border: 1px solid var(--border); border-radius: 16px; padding: 20px 22px; }
+.grid2 { display: grid; grid-template-columns: 1fr; gap: 18px; align-items: start; }
+.card { background: var(--card); border: 1px solid var(--border); border-radius: 16px; padding: 20px 22px; max-width: 640px; }
 .row { display: flex; gap: 10px; margin-bottom: 12px; flex-wrap: wrap; }
 .field { flex: 1; min-width: 110px; }
 .field label { display: block; font-size: 11px; color: var(--muted); margin-bottom: 5px; letter-spacing: .3px; }
@@ -1320,7 +1319,7 @@ textarea { font-family: "SF Mono",ui-monospace,Menlo,monospace; font-size: 12px;
 #msg.err { border-color: rgba(248,113,113,.4); color: var(--red); }
 
 /* ---------- leaderboard ---------- */
-.board-card { background: var(--card); border: 1px solid var(--border); border-radius: 16px; overflow: hidden; }
+.board-card { background: var(--card); border: 1px solid var(--border); border-radius: 16px; overflow-x: auto; }
 table { border-collapse: collapse; width: 100%; font-size: 13px; }
 thead th { text-align: left; font-size: 11px; color: var(--muted); font-weight: 600; letter-spacing: .5px; padding: 12px 14px; border-bottom: 1px solid var(--border); background: rgba(2,6,17,.35); position: sticky; top: 0; }
 tbody td { padding: 11px 14px; border-bottom: 1px solid rgba(148,163,184,.07); font-variant-numeric: tabular-nums; }
@@ -1570,10 +1569,8 @@ async function refresh() {
         <td style="text-align:right"><span class="${retCls}">${ret === null ? '—' : ret.toFixed(2) + '%'}</span>
             ${ret !== null ? `<div class="bar"><i style="width:${barPct}%;background:${ret>=0?'var(--green)':'var(--red)'}"></i></div>` : ''}</td>
         <td style="text-align:right">${fmt(s.drawdown_pct)}</td>
-        <td style="text-align:right">${s.trades ?? '—'}</td>
-        <td style="text-align:right">${fmt(s.win_rate_pct)}</td>
+        <td style="text-align:right">${s.trades ?? 0} / ${fmt(s.win_rate_pct)}%</td>
         <td style="text-align:right">${fmt(s.profit_factor)}</td>
-        <td style="text-align:right">${s.open_positions ?? '—'}</td>
         <td class="reasons">${reasons}</td>
         <td>${(s.status==='active'||s.status==='rejected') ? `<button class="icon-btn" onclick="del('${s.name}')">下线</button>` : ''}</td>`;
       tb.appendChild(tr);
