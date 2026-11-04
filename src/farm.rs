@@ -319,6 +319,44 @@ impl Book {
         Ok(())
     }
 
+    /// 净值曲线（按闭环时间排序的 [ts_ms, equity] 序列，画图用）
+    pub fn equity_curve(&self, limit: usize) -> Vec<(i64, Decimal)> {
+        match self.db.list_recent_trades(10_000) {
+            Ok(mut trades) => {
+                trades.reverse();
+                let init = self.cfg.account.initial_equity;
+                let mut out = vec![(0i64, init)];
+                for t in trades.iter().rev().take(limit) {
+                    let ts = chrono::DateTime::parse_from_rfc3339(&t.closed_at)
+                        .map(|d| d.timestamp_millis())
+                        .unwrap_or(0);
+                    out.push((ts, t.equity_after));
+                }
+                out
+            }
+            Err(_) => Vec::new(),
+        }
+    }
+
+    /// 最近 N 笔交易（详情弹窗用）
+    pub fn recent_trades_json(&self, n: usize) -> Vec<serde_json::Value> {
+        match self.db.list_recent_trades(n) {
+            Ok(trades) => trades
+                .iter()
+                .rev()
+                .map(|t| {
+                    serde_json::json!({
+                        "symbol": t.symbol, "side": t.side,
+                        "entry": t.entry_price.to_string(), "exit": t.exit_price.to_string(),
+                        "net": t.net_pnl.to_string(), "r": t.r_multiple.round_dp(2).to_string(),
+                        "reason": t.exit_reason, "closed_at": t.closed_at,
+                    })
+                })
+                .collect(),
+            Err(_) => Vec::new(),
+        }
+    }
+
     /// 结构化状态（排行榜用）
     pub fn status(&self) -> BookStatus {
         let (Ok(acct), Ok(trades), Ok(positions)) = (
@@ -380,6 +418,17 @@ pub struct BookStatus {
     pub win_rate_pct: Decimal,
     pub profit_factor: Decimal,
     pub open_positions: usize,
+}
+
+fn curve_json(curve: &[(i64, Decimal)]) -> serde_json::Value {
+    serde_json::Value::Array(
+        curve
+            .iter()
+            .map(|(ts, eq)| {
+                serde_json::json!([ts, eq.to_string()])
+            })
+            .collect(),
+    )
 }
 
 // ============================================================================
@@ -633,6 +682,9 @@ pub struct Farm {
     pub data_mgr: DataManager,
     pub books: HashMap<String, Book>,
     pub registry: Vec<RegisteredSpec>,
+    /// 生产账本基准（主循环每拍更新，排行榜置顶展示）
+    pub production: Option<BookStatus>,
+    pub production_curve: Vec<(i64, Decimal)>,
     dir: PathBuf,
 }
 
@@ -645,6 +697,8 @@ impl Farm {
             data_mgr: data_mgr.clone(),
             books: HashMap::new(),
             registry: Vec::new(),
+            production: None,
+            production_curve: Vec::new(),
             dir: dir.clone(),
         };
         let reg_path = dir.join("registry.json");
@@ -753,15 +807,30 @@ impl Farm {
         }
     }
 
-    /// 排行榜：活跃账本实时状态 + 被拒/归档条目
+    /// 主循环每拍喂入生产账本状态（基准行）
+    pub fn set_production(&mut self, st: BookStatus, curve: Vec<(i64, Decimal)>) {
+        self.production = Some(st);
+        self.production_curve = curve;
+    }
+
+    /// 排行榜：生产基准置顶 + 活跃账本实时状态 + 被拒/归档条目
     pub fn leaderboard(&self) -> Vec<serde_json::Value> {
         let mut rows = Vec::new();
+        if let Some(p) = &self.production {
+            let mut v = serde_json::to_value(p).unwrap_or_default();
+            v["author"] = serde_json::Value::String("系统".to_string());
+            v["mode"] = serde_json::Value::String("production".to_string());
+            v["is_production"] = serde_json::Value::Bool(true);
+            v["curve"] = curve_json(&self.production_curve);
+            rows.push(v);
+        }
         for r in &self.registry {
             if r.status == "active" {
                 if let Some(book) = self.books.get(&r.spec.name) {
                     let mut st = serde_json::to_value(book.status()).unwrap_or_default();
                     st["author"] = serde_json::Value::String(r.spec.author.clone());
                     st["mode"] = serde_json::Value::String(r.spec.mode.clone());
+                    st["curve"] = curve_json(&book.equity_curve(500));
                     rows.push(st);
                 }
             } else {
@@ -788,7 +857,7 @@ pub async fn serve(farm: Arc<tokio::sync::Mutex<Farm>>, port: u16) -> Result<()>
     let app = Router::new()
         .route("/", get(index_page))
         .route("/api/strategies", get(list_strategies).post(submit_strategy))
-        .route("/api/strategies/:name", delete(remove_strategy))
+        .route("/api/strategies/:name", delete(remove_strategy).get(strategy_detail))
         .with_state(farm);
     let listener = tokio::net::TcpListener::bind(("0.0.0.0", port))
         .await
@@ -826,6 +895,33 @@ async fn remove_strategy(
     let mut f = farm.lock().await;
     f.remove(&name).map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
     Ok(Json(serde_json::json!({ "removed": name })))
+}
+
+async fn strategy_detail(
+    State(farm): State<Arc<tokio::sync::Mutex<Farm>>>,
+    axum::extract::Path(name): axum::extract::Path<String>,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    let f = farm.lock().await;
+    if name == "__production__" {
+        if let Some(p) = &f.production {
+            return Ok(Json(serde_json::json!({
+                "status": p, "curve": curve_json(&f.production_curve), "trades": [],
+            })));
+        }
+        return Err((StatusCode::NOT_FOUND, "生产账本尚未就绪".to_string()));
+    }
+    let book = f.books.get(&name).ok_or((
+        StatusCode::NOT_FOUND,
+        format!("策略 {} 不存在或未激活", name),
+    ))?;
+    let reg = f.registry.iter().find(|r| r.spec.name == name);
+    Ok(Json(serde_json::json!({
+        "status": book.status(),
+        "curve": curve_json(&book.equity_curve(2000)),
+        "trades": book.recent_trades_json(20),
+        "validation": reg.and_then(|r| r.validation.clone()),
+        "spec": reg.map(|r| r.spec.clone()),
+    })))
 }
 
 async fn index_page() -> Html<&'static str> {
@@ -959,6 +1055,23 @@ details.help code { background: rgba(59,130,246,.12); color: #93c5fd; padding: 1
 footer { text-align: center; margin-top: 46px; color: var(--dim); font-size: 11.5px; }
 footer a { color: var(--muted); text-decoration: none; }
 footer a:hover { color: var(--blue); }
+.spark { width: 110px; height: 28px; }
+.spark path.line { fill: none; stroke-width: 1.6; }
+.prod-row td { background: var(--grad-soft) !important; border-top: 1px solid var(--border-hi); border-bottom: 1px solid var(--border-hi) !important; }
+.prod-row .name-cell::before { content: "★ "; color: var(--amber); }
+.modal-bg { position: fixed; inset: 0; background: rgba(2,6,17,.78); backdrop-filter: blur(6px); z-index: 50; display: none; align-items: center; justify-content: center; }
+.modal-bg.show { display: flex; }
+.modal { background: #0d1424; border: 1px solid var(--border-hi); border-radius: 18px; width: min(860px, 94vw); max-height: 90vh; overflow-y: auto; padding: 26px 28px; box-shadow: 0 24px 80px rgba(0,0,0,.6); }
+.modal h3 { font-size: 17px; display: flex; align-items: center; gap: 10px; }
+.modal .sub { color: var(--muted); font-size: 12px; margin-top: 4px; }
+.chart-box { margin: 18px 0 6px; background: rgba(2,6,17,.5); border: 1px solid var(--border); border-radius: 12px; padding: 14px; }
+.mstats { display: grid; grid-template-columns: repeat(auto-fit,minmax(110px,1fr)); gap: 10px; margin-top: 14px; }
+.mstat { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 10px 12px; }
+.mstat .k { font-size: 10.5px; color: var(--muted); } .mstat .v { font-size: 16px; font-weight: 700; margin-top: 3px; font-variant-numeric: tabular-nums; }
+.mclose { position: absolute; top: 40px; right: 40px; z-index: 60; }
+.trade-tbl { margin-top: 14px; font-size: 11.5px; }
+.trade-tbl td, .trade-tbl th { padding: 6px 8px; }
+tr.clickable { cursor: pointer; }
 .toast { position: fixed; bottom: 24px; right: 24px; background: #131a2b; border: 1px solid var(--border-hi); border-radius: 12px; padding: 12px 18px; font-size: 13px; box-shadow: 0 10px 34px rgba(0,0,0,.5); opacity: 0; transform: translateY(8px); transition: all .25s; pointer-events: none; }
 .toast.show { opacity: 1; transform: translateY(0); }
 </style>
@@ -1015,7 +1128,7 @@ footer a:hover { color: var(--blue); }
     <div class="board-card" id="board-wrap">
       <table id="board">
         <thead><tr>
-          <th>策略</th><th>状态</th><th style="text-align:right">净值</th><th style="text-align:right">收益</th>
+          <th>策略</th><th>状态</th><th>净值曲线</th><th style="text-align:right">净值</th><th style="text-align:right">收益</th>
           <th style="text-align:right">回撤</th><th style="text-align:right">闭环</th><th style="text-align:right">胜率</th>
           <th style="text-align:right">PF</th><th style="text-align:right">持仓</th><th>验证门备注</th><th></th>
         </tr></thead>
@@ -1060,6 +1173,10 @@ footer a:hover { color: var(--blue); }
 <footer>Quant Farm · <a href="https://github.com/ai-quant-trading/quant-farm" target="_blank">github.com/ai-quant-trading/quant-farm</a> · 策略必须证明自己的 Alpha，才配动用资金</footer>
 </div>
 
+<div class="modal-bg" id="modal-bg" onclick="if(event.target===this)closeDetail()">
+  <button class="icon-btn mclose" onclick="closeDetail()">✕ 关闭</button>
+  <div class="modal" id="modal-body"></div>
+</div>
 <div class="toast" id="toast"></div>
 
 <script>
@@ -1129,9 +1246,13 @@ async function refresh() {
       const reasons = Array.isArray(s.reasons) ? s.reasons.join('；') : '';
       const tr = document.createElement('tr');
       const barPct = ret === null ? 0 : Math.min(Math.abs(ret) / 40 * 100, 100);
+      const isProd = !!s.is_production;
+      tr.className = (isProd ? 'prod-row ' : 'clickable ') + (s.status||'active');
+      tr.onclick = () => openDetail(isProd ? '__production__' : s.name);
       tr.innerHTML = `
-        <td class="name-cell">${s.name}<small>${s.author || ''} · ${s.mode || ''}</small></td>
+        <td class="name-cell">${isProd ? '生产账本（基准）' : s.name}<small>${s.author || ''} · ${s.mode || ''}</small></td>
         <td><span class="pill ${s.status}">${({active:"运行中",rejected:"已拒收",archived:"已下线"})[s.status]||s.status}</span></td>
+        <td>${sparkline(s.curve)}</td>
         <td style="text-align:right">${fmt(s.equity)}</td>
         <td style="text-align:right"><span class="${retCls}">${ret === null ? '—' : ret.toFixed(2) + '%'}</span>
             ${ret !== null ? `<div class="bar"><i style="width:${barPct}%;background:${ret>=0?'var(--green)':'var(--red)'}"></i></div>` : ''}</td>
@@ -1145,6 +1266,76 @@ async function refresh() {
       tb.appendChild(tr);
     });
   } catch (e) { console.error(e); }
+}
+
+function sparkline(curve) {
+  if (!Array.isArray(curve) || curve.length < 2) return '<span style="color:var(--dim);font-size:11px">—</span>';
+  const pts = curve.map(c => [c[0], +c[1]]);
+  const eqs = pts.map(p => p[1]);
+  const min = Math.min(...eqs), max = Math.max(...eqs);
+  const W = 110, H = 28, span = (max - min) || 1;
+  const path = pts.map((p, i) => {
+    const x = (i / (pts.length - 1)) * W;
+    const y = H - 3 - ((p[1] - min) / span) * (H - 6);
+    return (i === 0 ? 'M' : 'L') + x.toFixed(1) + ',' + y.toFixed(1);
+  }).join(' ');
+  const up = eqs[eqs.length-1] >= eqs[0];
+  const color = up ? 'var(--green)' : 'var(--red)';
+  const area = path + ' L' + W + ',' + H + ' L0,' + H + ' Z';
+  return `<svg class="spark" viewBox="0 0 ${W} ${H}"><path d="${area}" fill="${up?'rgba(52,211,153,.13)':'rgba(248,113,113,.13)'}"/><path class="line" d="${path}" stroke="${color}"/></svg>`;
+}
+
+async function openDetail(name) {
+  try {
+    const r = await fetch('/api/strategies/' + encodeURIComponent(name));
+    if (!r.ok) { toast('详情获取失败'); return; }
+    const d = await r.json();
+    const s = d.status || {};
+    const curve = d.curve || [];
+    const big = bigChart(curve, s.initial_equity);
+    const trades = (d.trades||[]).map(t => `<tr>
+      <td>${t.symbol}</td><td class="${t.side==='LONG'?'pos':'neg'}">${t.side}</td>
+      <td class="mono">${t.entry}</td><td class="mono">${t.exit}</td>
+      <td class="${+t.net>=0?'pos':'neg'} mono">${(+t.net).toFixed(3)}U</td>
+      <td class="mono">${(+t.r).toFixed(2)}R</td>
+      <td style="color:var(--muted);font-size:10.5px">${t.reason}</td></tr>`).join('');
+    const val = d.validation;
+    document.getElementById('modal-body').innerHTML = `
+      <h3>${name==='__production__'?'★ 生产账本（真实模式账本）':s.name}
+        <span class="pill ${s.status}">${({active:"运行中",rejected:"已拒收",archived:"已下线"})[s.status]||s.status}</span></h3>
+      <div class="sub">${name==='__production__'?'RegimeRouter · 生产主账本 · 真实风险预算':((d.spec&&(d.spec.author+' · '+d.spec.mode))||'')}</div>
+      <div class="chart-box">${big}</div>
+      <div class="mstats">
+        <div class="mstat"><div class="k">净值</div><div class="v">${fmt(s.equity)}U</div></div>
+        <div class="mstat"><div class="k">收益率</div><div class="v ${(+s.return_pct)>=0?'pos':'neg'}">${fmt(s.return_pct)}%</div></div>
+        <div class="mstat"><div class="k">最大回撤</div><div class="v">${fmt(s.drawdown_pct)}%</div></div>
+        <div class="mstat"><div class="k">闭环 / 胜率</div><div class="v">${s.trades??0} · ${fmt(s.win_rate_pct)}%</div></div>
+        <div class="mstat"><div class="k">Profit Factor</div><div class="v">${fmt(s.profit_factor)}</div></div>
+        ${val?`<div class="mstat"><div class="k">验证门</div><div class="v ${val.pass?'pos':'neg'}" style="font-size:13px">${val.pass?'通过':'拒收'}</div></div>`:''}
+      </div>
+      ${trades?`<table class="trade-tbl"><thead><tr><th>币种</th><th>方向</th><th>开仓</th><th>平仓</th><th>净盈亏</th><th>R</th><th>出场原因</th></tr></thead><tbody>${trades}</tbody></table>`:''}
+      ${val&&!val.pass?`<div style="margin-top:12px;font-size:12px;color:var(--red)">拒收原因：${(val.reasons||[]).join('；')}</div>`:''}
+    `;
+    document.getElementById('modal-bg').classList.add('show');
+  } catch(e) { toast('详情加载失败: '+e); }
+}
+function bigChart(curve, initial) {
+  if (!Array.isArray(curve) || curve.length < 2) return '<div class="empty" style="padding:20px">暂无曲线数据（等第一笔闭环）</div>';
+  const pts = curve.map(c => [c[0], +c[1]]);
+  const eqs = pts.map(p=>p[1]);
+  const min = Math.min(...eqs, +initial||Infinity), max = Math.max(...eqs, +initial||-Infinity);
+  const W = 760, H = 220, pad = 8, span = (max-min)||1;
+  const x = i => pad + (i/(pts.length-1))*(W-2*pad);
+  const y = v => H-pad - ((v-min)/span)*(H-2*pad);
+  const path = pts.map((p,i)=>(i?'L':'M')+x(i).toFixed(1)+','+y(p[1]).toFixed(1)).join(' ');
+  const up = eqs[eqs.length-1] >= (+initial||eqs[0]);
+  const area = path + ` L${x(pts.length-1).toFixed(1)},${H-pad} L${pad},${H-pad} Z`;
+  const grid = [0.25,0.5,0.75].map(g=>`<line x1="${pad}" y1="${(H-2*pad)*g+pad}" x2="${W-pad}" y2="${(H-2*pad)*g+pad}" stroke="rgba(148,163,184,.1)"/>`).join('');
+  const labels = `<text x="${pad+4}" y="${y(max)+12}" fill='#5b6a80' font-size="10">${max.toFixed(1)}U</text><text x="${pad+4}" y="${y(min)-4}" fill='#5b6a80' font-size="10">${min.toFixed(1)}U</text>`;
+  const zeroLine = (+initial&&initial<=max&&initial>=min) ? `<line x1="${pad}" y1="${y(+initial)}" x2="${W-pad}" y2="${y(+initial)}" stroke="rgba(148,163,184,.3)" stroke-dasharray="4 4"/>` : '';
+  return `<svg viewBox="0 0 ${W} ${H}" style="width:100%">${grid}${zeroLine}
+    <path d="${area}" fill="${up?'rgba(52,211,153,.14)':'rgba(248,113,113,.14)'}"/>
+    <path d="${path}" fill="none" stroke="${up?'#34d399':'#f87171'}" stroke-width="2"/>${labels}</svg>`;
 }
 
 function fmt(v){ return (v===undefined||v===null||v==='') ? '—' : (+v).toFixed(2); }
@@ -1181,6 +1372,9 @@ async function submitStrategy() {
   } catch (e) { setMsg('❌ ' + e, 'err'); }
   finally { btn.disabled = false; btn.textContent = '🚀 提交并验证'; }
 }
+
+function closeDetail() { document.getElementById('modal-bg').classList.remove('show'); }
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeDetail(); });
 
 async function del(name) {
   await fetch('/api/strategies/' + name, { method: 'DELETE' });

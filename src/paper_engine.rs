@@ -1585,10 +1585,48 @@ impl SqlitePaperEngine {
                     warn!("[影子巡检失败] {} (影子本轮跳过，不影响生产)", e);
                 }
             }
-            // 策略农场每拍巡检（全部账本零资金并行）
+            // 策略农场每拍巡检（全部账本零资金并行）+ 喂入生产基准状态
             if let Some(f) = farm.as_ref() {
                 let mut fguard = f.lock().await;
                 fguard.on_cycle(&quotes, regime, &coin_metrics, now_ms);
+                let prod_trades = db.list_recent_trades(500).unwrap_or_default();
+                let prod_status = crate::farm::BookStatus {
+                    name: "__production__".to_string(),
+                    status: "active".to_string(),
+                    equity: acct.total_equity,
+                    initial_equity: acct.initial_equity,
+                    return_pct: if acct.initial_equity > Decimal::ZERO {
+                        (acct.total_equity / acct.initial_equity - Decimal::ONE) * dec!(100)
+                    } else {
+                        Decimal::ZERO
+                    },
+                    drawdown_pct: if acct.peak_equity > Decimal::ZERO {
+                        (acct.peak_equity - acct.total_equity) / acct.peak_equity * dec!(100)
+                    } else {
+                        Decimal::ZERO
+                    },
+                    trades: prod_trades.len(),
+                    wins: acct.win_trades,
+                    win_rate_pct: if acct.total_trades > 0 {
+                        Decimal::from(acct.win_trades) * dec!(100) / Decimal::from(acct.total_trades)
+                    } else {
+                        Decimal::ZERO
+                    },
+                    profit_factor: {
+                        let gw: Decimal = prod_trades.iter().map(|t| t.net_pnl.max(Decimal::ZERO)).sum();
+                        let gl: Decimal = prod_trades.iter().map(|t| t.net_pnl.min(Decimal::ZERO)).sum();
+                        if gl < Decimal::ZERO { gw / gl.abs() } else if gw > Decimal::ZERO { dec!(999) } else { Decimal::ZERO }
+                    },
+                    open_positions: surviving_positions.len(),
+                };
+                let mut curve = vec![(0i64, acct.initial_equity)];
+                for t in prod_trades.iter().rev() {
+                    let ts = chrono::DateTime::parse_from_rfc3339(&t.closed_at)
+                        .map(|d| d.timestamp_millis())
+                        .unwrap_or(0);
+                    curve.push((ts, t.equity_after));
+                }
+                fguard.set_production(prod_status, curve);
             }
 
             let (q_cnt, o_cnt, p_cnt, t_cnt) = db.count_table_rows()?;
