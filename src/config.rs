@@ -206,6 +206,10 @@ pub enum StrategyMode {
     BearShort,
     /// 按大盘状态自动路由: Bull 走 long_only_breakout, Bear 走 bear_short, Chop 空仓
     RegimeRouter,
+    /// EMA 双均线交叉（开源经典移植: 金叉做多/死叉做空, freqtrade Strategy001 同族）
+    EmaCross,
+    /// NFI 精神深回调买（上升趋势 + 价格深度跌离均线 + 阳线企稳才接, 多层保护）
+    DipBuy,
 }
 
 impl Default for StrategyMode {
@@ -224,6 +228,8 @@ impl std::fmt::Display for StrategyMode {
             StrategyMode::EnsembleComposite => write!(f, "EnsembleComposite (多因子融合策略)"),
             StrategyMode::ChopMeanReversion => write!(f, "ChopMeanReversion (震荡区间均值回归)"),
             StrategyMode::BearShort => write!(f, "BearShort (成熟熊市空头)"),
+            StrategyMode::EmaCross => write!(f, "EmaCross (EMA双均线交叉)"),
+            StrategyMode::DipBuy => write!(f, "DipBuy (趋势深回调买)"),
             StrategyMode::RegimeRouter => write!(f, "RegimeRouter (按大盘状态自动路由)"),
         }
     }
@@ -303,7 +309,30 @@ pub struct StrategyConfig {
     /// 危机护栏：BTC ATR 分位 >= 该值时禁止新空（波动爆炸=轧空风险），默认 95
     #[serde(default = "default_bear_vol_cap")]
     pub bear_max_atr_percentile: Decimal,
+    // ---- EmaCross 双均线交叉（开源经典移植）----
+    /// 快线周期，默认 20
+    #[serde(default = "default_ema_fast")]
+    pub ema_fast_period: usize,
+    /// 慢线周期，默认 60
+    #[serde(default = "default_ema_slow")]
+    pub ema_slow_period: usize,
+    /// 是否允许死叉做空（false = 仅金叉做多），默认 true
+    #[serde(default = "default_ema_allow_short")]
+    pub ema_cross_allow_short: bool,
+    // ---- DipBuy NFI 精神：趋势深回调买 ----
+    /// 趋势判定均线周期（价格与 EMA20 都在其上才算上升趋势），默认 100
+    #[serde(default = "default_dip_trend_ema")]
+    pub dip_trend_ema: usize,
+    /// 回调深度阈值（价格低于 EMA20 的 ATR 倍数），默认 1.5
+    #[serde(default = "default_dip_depth")]
+    pub dip_depth_atr: Decimal,
 }
+
+fn default_ema_fast() -> usize { 20 }
+fn default_ema_slow() -> usize { 60 }
+fn default_ema_allow_short() -> bool { true }
+fn default_dip_trend_ema() -> usize { 100 }
+fn default_dip_depth() -> Decimal { dec!(1.5) }
 
 fn default_recent_move_window() -> u64 {
     10

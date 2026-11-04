@@ -466,6 +466,8 @@ pub const PARAM_ALLOWLIST: &[&str] = &[
     "chop_mr_tp_atr", "chop_mr_time_stop_bars",
     "bear_stop_atr", "bear_tp_atr", "bear_maturity_bars", "bear_time_stop_bars",
     "bear_entry_variant", "bear_max_atr_percentile",
+    "ema_fast_period", "ema_slow_period", "ema_cross_allow_short",
+    "dip_trend_ema", "dip_depth_atr",
 ];
 
 fn json_to_decimal(v: &serde_json::Value) -> Option<Decimal> {
@@ -498,8 +500,10 @@ pub fn spec_to_config(base: &AppConfig, spec: &StrategySpec) -> Result<AppConfig
         "bear_short" => StrategyMode::BearShort,
         "chop_mean_reversion" => StrategyMode::ChopMeanReversion,
         "regime_router" => StrategyMode::RegimeRouter,
+        "ema_cross" => StrategyMode::EmaCross,
+        "dip_buy" => StrategyMode::DipBuy,
         other => bail!(
-            "未知模式: {} (可选: long_only_breakout / bear_short / chop_mean_reversion / regime_router)",
+            "未知模式: {} (可选: long_only_breakout / bear_short / chop_mean_reversion / regime_router / ema_cross / dip_buy)",
             other
         ),
     };
@@ -533,6 +537,14 @@ pub fn spec_to_config(base: &AppConfig, spec: &StrategySpec) -> Result<AppConfig
             "chop_mr_time_stop_bars" => s.chop_mr_time_stop_bars = json_to_usize(v).ok_or_else(bad)?,
             "bear_maturity_bars" => s.bear_maturity_bars = json_to_usize(v).ok_or_else(bad)?,
             "bear_time_stop_bars" => s.bear_time_stop_bars = json_to_usize(v).ok_or_else(bad)?,
+            "ema_fast_period" => s.ema_fast_period = json_to_usize(v).ok_or_else(bad)?,
+            "ema_slow_period" => s.ema_slow_period = json_to_usize(v).ok_or_else(bad)?,
+            "dip_trend_ema" => s.dip_trend_ema = json_to_usize(v).ok_or_else(bad)?,
+            "ema_cross_allow_short" => match v {
+                serde_json::Value::Bool(b) => s.ema_cross_allow_short = *b,
+                serde_json::Value::String(x) if x == "true" || x == "false" => s.ema_cross_allow_short = x == "true",
+                _ => return Err(bad()),
+            },
             "bear_entry_variant" => match v.as_str() {
                 Some(x @ ("breakdown" | "rejection" | "both")) => s.bear_entry_variant = x.to_string(),
                 _ => return Err(bad()),
@@ -558,6 +570,7 @@ pub fn spec_to_config(base: &AppConfig, spec: &StrategySpec) -> Result<AppConfig
                     "bear_stop_atr" => s.bear_stop_atr = d,
                     "bear_tp_atr" => s.bear_tp_atr = d,
                     "bear_max_atr_percentile" => s.bear_max_atr_percentile = d,
+                    "dip_depth_atr" => s.dip_depth_atr = d,
                     _ => unreachable!(),
                 }
             }
@@ -1110,6 +1123,8 @@ tr.clickable { cursor: pointer; }
         <option value="long_only_breakout">🐂 long_only · 牛市突破</option>
         <option value="chop_mean_reversion">🔁 chop_mr · 震荡回归</option>
         <option value="regime_router">🧭 regime_router · 状态路由</option>
+        <option value="ema_cross">✖️ ema_cross · EMA双均线交叉</option>
+        <option value="dip_buy">🛡️ dip_buy · NFI深回调买</option>
       </select></div>
     </div>
     <div class="field"><label>参数 JSON（白名单见下方速查）</label>

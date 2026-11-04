@@ -338,6 +338,8 @@ async fn main() -> Result<()> {
                     "ensemble_composite" => StrategyMode::EnsembleComposite,
                     "chop_mean_reversion" => StrategyMode::ChopMeanReversion,
                     "bear_short" => StrategyMode::BearShort,
+                    "ema_cross" => StrategyMode::EmaCross,
+                    "dip_buy" => StrategyMode::DipBuy,
                     "regime_router" => StrategyMode::RegimeRouter,
                     other => anyhow::bail!(
                         "未知策略模式: {} (可选: long_only_breakout / all_weather_breakout / volatility_squeeze / trend_pullback / ensemble_composite / chop_mean_reversion / bear_short)",

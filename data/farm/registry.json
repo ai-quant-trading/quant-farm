@@ -41,9 +41,9 @@
       "author": "tester",
       "mode": "bear_short",
       "params": {
+        "bear_tp_atr": "0.5",
         "bear_stop_atr": "1.0",
-        "volume_surge_mult": "1.0",
-        "bear_tp_atr": "0.5"
+        "volume_surge_mult": "1.0"
       },
       "universe": null,
       "initial_equity": "100"
@@ -67,5 +67,70 @@
       "validated_at": "2026-11-04T11:07:17.759865+00:00"
     },
     "submitted_at": "2026-11-04T11:07:17.759883+00:00"
+  },
+  {
+    "spec": {
+      "name": "opensource_ema_cross",
+      "author": "port_bot",
+      "mode": "ema_cross",
+      "params": {
+        "ema_cross_allow_short": true,
+        "ema_slow_period": 60,
+        "ema_fast_period": 20
+      },
+      "universe": null,
+      "initial_equity": "100"
+    },
+    "status": "rejected",
+    "validation": {
+      "spec_name": "opensource_ema_cross",
+      "pass": false,
+      "reasons": [
+        "全样本 PF 0.69 <= 1.1",
+        "全样本净利 -14.61 <= 0",
+        "前半样本净利 -14.61 <= 0（边际不稳定）",
+        "成本×1.5 后净利翻负（成本敏感）"
+      ],
+      "full_return_pct": "-14.618093150000000",
+      "full_pf": "0.6981646433335008999623852731",
+      "full_trades": 119,
+      "half_return_pct": "-14.618093150000000",
+      "half_pf": "0.6981646433335008999623852731",
+      "cost15_equity": "82.351190845000000",
+      "validated_at": "2026-11-04T12:49:52.196185+00:00"
+    },
+    "submitted_at": "2026-11-04T12:49:52.196205+00:00"
+  },
+  {
+    "spec": {
+      "name": "opensource_dip_buy",
+      "author": "port_bot",
+      "mode": "dip_buy",
+      "params": {
+        "dip_depth_atr": "1.5",
+        "dip_trend_ema": 100
+      },
+      "universe": null,
+      "initial_equity": "100"
+    },
+    "status": "rejected",
+    "validation": {
+      "spec_name": "opensource_dip_buy",
+      "pass": false,
+      "reasons": [
+        "全样本 PF 0.54 <= 1.1",
+        "全样本净利 -8.79 <= 0",
+        "前半样本净利 -10.04 <= 0（边际不稳定）",
+        "成本×1.5 后净利翻负（成本敏感）"
+      ],
+      "full_return_pct": "-8.799420181000000",
+      "full_pf": "0.5437174847680818724744241044",
+      "full_trades": 40,
+      "half_return_pct": "-10.041777315000000",
+      "half_pf": "0.0587087276244470367977647688",
+      "cost15_equity": "90.222588074000000",
+      "validated_at": "2026-11-04T12:49:57.646307+00:00"
+    },
+    "submitted_at": "2026-11-04T12:49:57.646342+00:00"
   }
 ]

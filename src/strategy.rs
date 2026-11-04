@@ -483,6 +483,150 @@ fn bear_rejection_setup(
     near_ema && red_candle && quiet_volume
 }
 
+
+/// EMA 双均线交叉扫描（开源经典移植，freqtrade Strategy001 同族）。
+/// 金叉（快线上穿慢线）→ LONG；死叉 → SHORT（`ema_cross_allow_short` 可关）。
+/// 信号在交叉当根 K 线收盘确认，引擎按 T+1 开盘成交。
+fn scan_ema_cross_signals(
+    universe_candles: &HashMap<String, &[Candle]>,
+    cfg: &StrategyConfig,
+) -> Vec<SignalCandidate> {
+    let fast_p = cfg.ema_fast_period;
+    let slow_p = cfg.ema_slow_period.max(cfg.ema_fast_period + 1);
+    let mut signals = Vec::new();
+    for symbol in &cfg.universe {
+        if cfg.execution_blacklist.iter().any(|b| b == symbol) {
+            continue;
+        }
+        let candles = match universe_candles.get(symbol) {
+            Some(&c) if c.len() > slow_p + 5 => c,
+            _ => continue,
+        };
+        let last_candle = match candles.last() {
+            Some(c) => c,
+            None => continue,
+        };
+        let cur_atr = match atr(candles, cfg.atr_period) {
+            Some(a) if a > Decimal::ZERO => a,
+            _ => continue,
+        };
+        let closes: Vec<Decimal> = candles.iter().map(|c| c.close).collect();
+        let prev_closes = &closes[..closes.len() - 1];
+        let (f_now, s_now) = match (ema(&closes, fast_p), ema(&closes, slow_p)) {
+            (Some(f), Some(s)) => (f, s),
+            _ => continue,
+        };
+        let (f_prev, s_prev) = match (ema(prev_closes, fast_p), ema(prev_closes, slow_p)) {
+            (Some(f), Some(s)) => (f, s),
+            _ => continue,
+        };
+        // 乖离闸门：交叉点离均线太远（追极端）不进
+        if s_now > Decimal::ZERO && (last_candle.close - s_now).abs() / s_now > cfg.max_bias_pct {
+            continue;
+        }
+        let spec = SymbolSpec::default_for(symbol);
+        let golden_cross = f_prev <= s_prev && f_now > s_now;
+        let death_cross = f_prev >= s_prev && f_now < s_now;
+        let (side, weak) = if golden_cross {
+            (Side::Long, dec!(1))
+        } else if death_cross && cfg.ema_cross_allow_short {
+            (Side::Short, dec!(1))
+        } else {
+            continue;
+        };
+        let close = last_candle.close;
+        let stop_mult = stop_atr_mult(cfg);
+        let proposed_stop = match side {
+            Side::Long => spec.round_price(close - cur_atr * stop_mult),
+            Side::Short => spec.round_price(close + cur_atr * stop_mult),
+        };
+        let stop_valid = match side {
+            Side::Long => proposed_stop > Decimal::ZERO && proposed_stop < close,
+            Side::Short => proposed_stop > close,
+        };
+        if stop_valid {
+            signals.push(SignalCandidate {
+                symbol: symbol.clone(),
+                side,
+                score: weak,
+                signal_close: close,
+                proposed_stop,
+                atr_val: cur_atr,
+            });
+        }
+    }
+    signals
+}
+
+/// NFI 精神深回调买扫描：上升趋势（价格与 EMA20 都在长周期均线上方）
+/// + 价格深度跌离 EMA20（>= dip_depth_atr × ATR）
+/// + 当根阳线企稳（NFI 式确认，不在下落途中接刀）
+fn scan_dip_buy_signals(
+    universe_candles: &HashMap<String, &[Candle]>,
+    cfg: &StrategyConfig,
+) -> Vec<SignalCandidate> {
+    let mut signals = Vec::new();
+    for symbol in &cfg.universe {
+        if cfg.execution_blacklist.iter().any(|b| b == symbol) {
+            continue;
+        }
+        let candles = match universe_candles.get(symbol) {
+            Some(&c) if c.len() > cfg.dip_trend_ema + 5 => c,
+            _ => continue,
+        };
+        let last_candle = match candles.last() {
+            Some(c) => c,
+            None => continue,
+        };
+        let cur_atr = match atr(candles, cfg.atr_period) {
+            Some(a) if a > Decimal::ZERO => a,
+            _ => continue,
+        };
+        let closes: Vec<Decimal> = candles.iter().map(|c| c.close).collect();
+        let (e20, e_trend) = match (ema(&closes, 20), ema(&closes, cfg.dip_trend_ema)) {
+            (Some(a), Some(b)) => (a, b),
+            _ => continue,
+        };
+        if e_trend <= Decimal::ZERO {
+            continue;
+        }
+        // 趋势闸门：上升趋势确认（价格与 EMA20 都在长均线上方）
+        if last_candle.close <= e_trend || e20 <= e_trend {
+            continue;
+        }
+        // 回调深度：价格跌离 EMA20 达到阈值（深回调，不是普通波动）
+        let dip = (e20 - last_candle.close) / cur_atr;
+        if dip < cfg.dip_depth_atr {
+            continue;
+        }
+        // 企稳确认：当根必须收阳（NFI 式保护，不接下落刀）
+        if last_candle.close <= last_candle.open {
+            continue;
+        }
+        // 乖离闸门：跌得离趋势均线太远（趋势可能已坏）不接
+        if (last_candle.close - e_trend).abs() / e_trend > cfg.max_bias_pct * dec!(2) {
+            continue;
+        }
+        let spec = SymbolSpec::default_for(symbol);
+        let close = last_candle.close;
+        let stop_mult = stop_atr_mult(cfg);
+        let proposed_stop = spec.round_price(close - cur_atr * stop_mult);
+        if proposed_stop > Decimal::ZERO && proposed_stop < close {
+            signals.push(SignalCandidate {
+                symbol: symbol.clone(),
+                side: Side::Long,
+                score: dip,
+                signal_close: close,
+                proposed_stop,
+                atr_val: cur_atr,
+            });
+        }
+    }
+    // 回调最深者优先
+    signals.sort_by(|a, b| b.score.cmp(&a.score));
+    signals.into_iter().take(cfg.top_k_momentum).collect()
+}
+
 pub fn scan_entry_signals(
     regime: MarketRegime,
     universe_candles: &HashMap<String, &[Candle]>,
@@ -521,6 +665,14 @@ pub fn scan_entry_signals(
             return scan_bear_short_signals(universe_candles, btc_candles, cfg);
         }
         return Vec::new();
+    }
+    // EMA 双均线交叉（开源经典移植）：不依赖大盘状态，金叉/死叉本身就是信号
+    if cfg.mode == StrategyMode::EmaCross {
+        return scan_ema_cross_signals(universe_candles, cfg);
+    }
+    // NFI 精神深回调买：上升趋势 + 深度跌离均线 + 阳线企稳（与大盘状态无关，趋势自带）
+    if cfg.mode == StrategyMode::DipBuy {
+        return scan_dip_buy_signals(universe_candles, cfg);
     }
     if regime == MarketRegime::Chop {
         return Vec::new();
@@ -643,6 +795,7 @@ pub fn scan_entry_signals(
                     StrategyMode::ChopMeanReversion => false,
                     // BearShort 模式在函数入口已分流到 scan_bear_short_signals，趋势臂不可达
                     StrategyMode::BearShort => false,
+                    StrategyMode::EmaCross | StrategyMode::DipBuy => false,
                     // RegimeRouter 在函数入口已按大盘状态分流，不会走到趋势臂的 mode 判断
                     StrategyMode::RegimeRouter => false,
                 };
