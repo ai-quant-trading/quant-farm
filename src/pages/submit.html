@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>策略中心 · Quant Farm</title>
+<style>{{CSS}}</style>
+</head>
+<body>
+<header><div class="wrap"><div class="nav">
+  <div class="logo">🌾</div>
+  <div class="brand">Quant Farm<small>STRATEGY FARM · PROOF OF ALPHA</small></div>
+  <div class="tabs">
+    <a class="tab" href="/">📊 仪表盘</a>
+    <a class="tab active" href="/submit">📝 策略中心</a>
+  </div>
+</div></div></header>
+
+<div class="wrap">
+<h2 class="sec"><span class="num">1</span>选择模板 · 一键填充</h2>
+<div class="tpls" id="tpls"></div>
+
+<h2 class="sec"><span class="num">2</span>提交策略</h2>
+<div class="card">
+  <div class="row">
+    <div class="field"><label>策略名（唯一 · a-z0-9_-）</label><input id="name" placeholder="my_bear_v2"></div>
+    <div class="field" style="max-width:110px"><label>作者</label><input id="author" placeholder="名字"></div>
+  </div>
+  <div class="row">
+    <div class="field"><label>策略家族（12 个可选）</label>
+    <select id="mode">
+      <option value="bear_short">🐻 bear_short · 熊市空头</option>
+      <option value="long_only_breakout">🐂 long_only · 牛市突破</option>
+      <option value="regime_router">🧭 regime_router · 状态路由</option>
+      <option value="ema_cross">✖️ ema_cross · EMA双均线</option>
+      <option value="dip_buy">🛡️ dip_buy · NFI深回调</option>
+      <option value="supertrend">📈 supertrend · ATR趋势</option>
+      <option value="macd_cross">📊 macd_cross · MACD动量</option>
+      <option value="bb_reversion">📐 bb_reversion · 布林带回归</option>
+      <option value="ichimoku">☁️ ichimoku · 一目均衡</option>
+      <option value="grid_step">🔲 grid_step · 网格阶梯</option>
+      <option value="chop_mean_reversion">🔁 chop_mr · 震荡回归</option>
+      <option value="combo">🧩 combo · 组合策略</option>
+    </select></div>
+  </div>
+  <div class="field"><label>参数 JSON（白名单见下方速查）</label>
+  <textarea id="params" spellcheck="false">{
+  "bear_stop_atr": "2.5",
+  "bear_tp_atr": "4.0",
+  "bear_maturity_bars": 24
+}</textarea></div>
+  <div style="display:flex;gap:8px;margin-top:12px">
+    <button class="btn" id="submitBtn" onclick="submitStrategy()">🚀 提交并验证（10~30s）</button>
+    <a href="/" class="btn ghost" style="text-decoration:none;display:inline-flex;align-items:center;padding:10px 18px">📊 查看排行榜</a>
+  </div>
+  <div id="msg"></div>
+</div>
+
+<details class="help">
+<summary>📐 参数速查 · 白名单旋钮</summary>
+<div class="inner"><table>
+<tr><td><code>top_k_momentum</code></td><td>选前N</td><td><code>donchian_period</code></td><td>通道周期</td></tr>
+<tr><td><code>volume_surge_mult</code></td><td>放量确认</td><td><code>initial_stop_atr_mult</code></td><td>止损×ATR</td></tr>
+<tr><td><code>chandelier_atr_mult</code></td><td>吊灯止盈</td><td><code>time_stop_bars</code></td><td>时间止损</td></tr>
+<tr><td><code>bear_stop_atr</code></td><td>空头止损</td><td><code>bear_tp_atr</code></td><td>空头止盈</td></tr>
+<tr><td><code>bear_maturity_bars</code></td><td>熊市确认h</td><td><code>ema_fast/slow</code></td><td>EMA周期</td></tr>
+<tr><td><code>st_multiplier</code></td><td>ST倍数</td><td><code>macd_fast/slow/signal</code></td><td>MACD</td></tr>
+<tr><td><code>bb_period / bb_std</code></td><td>布林带</td><td><code>dip_depth_atr</code></td><td>回调深度</td></tr>
+</table></div>
+</details>
+
+<details class="help">
+<summary>⚠️ 验证门判例（实测踩坑）</summary>
+<div class="inner" style="font-size:12.5px;color:#cbd5e1;line-height:1.8">
+🚫 去掉放量确认 → 414笔亏16%<br>
+🚫 止盈贴太近 → 成本吃掉利润<br>
+🚫 只对近期调参 → 前半样本门拒<br>
+🚫 交易&lt;10笔 → 样本不足拒收
+</div>
+</details>
+</div>
+
+<div class="toast" id="toast"></div>
+<footer>Quant Farm · <a href="https://github.com/ai-quant-trading/quant-farm">GitHub</a> · 提交后去<a href="/" style="color:var(--blue)">仪表盘</a>看实时表现</footer>
+
+<script>
+function toast(t){const e=document.getElementById('toast');e.textContent=t;e.classList.add('show');clearTimeout(e._h);e._h=setTimeout(()=>e.classList.remove('show'),2600)}
+const TEMPLATES=[
+  {icon:"🐻",name:"空头·网格最优",quality:"ok",qtext:"实测通过",desc:"验证门实测通过（+5.8% PF 1.17）",mode:"bear_short",params:{bear_stop_atr:"2.5",bear_tp_atr:"4.0",bear_maturity_bars:24,bear_time_stop_bars:10}},
+  {icon:"🐻",name:"空头·只做压破",quality:"ok",qtext:"变体",desc:"放量破20期低点才空",mode:"bear_short",params:{bear_entry_variant:"breakdown",bear_stop_atr:"2.5",bear_tp_atr:"4.0"}},
+  {icon:"🐻",name:"空头·只做衰竭",quality:"ok",qtext:"变体",desc:"反弹到均线阴线拒绝才空",mode:"bear_short",params:{bear_entry_variant:"rejection",bear_stop_atr:"3.0",bear_tp_atr:"4.0"}},
+  {icon:"🐂",name:"多头·冠军原版",quality:"ok",qtext:"现役冠军",desc:"12个月+34%冠军——改名字即可",mode:"long_only_breakout",params:{donchian_period:20,initial_stop_atr_mult:"2.2",chandelier_atr_mult:"3.0",time_stop_bars:16}},
+  {icon:"🧭",name:"路由·全天候",quality:"ok",qtext:"组合",desc:"牛做多/熊做空（+43% 回撤13.9%）",mode:"regime_router",params:{bear_stop_atr:"3.0",bear_tp_atr:"4.0"}},
+  {icon:"✖️",name:"EMA交叉",quality:"ok",qtext:"开源移植",desc:"freqtrade Strategy001同族",mode:"ema_cross",params:{ema_fast_period:20,ema_slow_period:60,ema_cross_allow_short:true}},
+  {icon:"🛡️",name:"NFI深回调",quality:"ok",qtext:"开源移植",desc:"NostalgiaForInfinity核心思想",mode:"dip_buy",params:{dip_trend_ema:100,dip_depth_atr:"1.5"}},
+  {icon:"📈",name:"SuperTrend",quality:"ok",qtext:"开源移植",desc:"ATR通道趋势跟踪",mode:"supertrend",params:{st_atr_period:10,st_multiplier:"3.0"}},
+  {icon:"📊",name:"MACD经典",quality:"ok",qtext:"开源移植",desc:"12/26/9金叉死叉",mode:"macd_cross",params:{macd_fast:12,macd_slow:26,macd_signal:9}},
+  {icon:"📐",name:"布林带回归",quality:"ok",qtext:"开源移植",desc:"下轨买/上轨卖",mode:"bb_reversion",params:{bb_period:20,bb_std:"2.0"}},
+  {icon:"☁️",name:"一目均衡",quality:"ok",qtext:"开源移植",desc:"云图+转换线金叉",mode:"ichimoku",params:{ichi_tenkan:9,ichi_kijun:26}},
+  {icon:"🧩",name:"组合·路由+空头",quality:"ok",qtext:"组合",desc:"60%路由+40%空头（需手写JSON）",mode:"combo",params:{},combo:[{mode:"regime_router",weight:"0.6"},{mode:"bear_short",weight:"0.4",params:{bear_stop_atr:"2.5"}}]},
+  {icon:"🔁",name:"震荡·实验",quality:"warn",qtext:"大概率被拒",desc:"历史全负",mode:"chop_mean_reversion",params:{chop_mr_stretch_atr:"2.0",chop_mr_tp_atr:"0.8"}},
+];
+function renderTemplates(){
+  const box=document.getElementById('tpls');
+  TEMPLATES.forEach((t,i)=>{
+    const d=document.createElement('div');d.className='tpl';
+    d.innerHTML=`<div class="t">${t.icon} ${t.name} <span class="tag ${t.quality}">${t.qtext}</span></div><div class="d">${t.desc}</div>`;
+    d.onclick=()=>{
+      document.getElementById('name').value=t.mode.slice(0,4)+'_'+i+'_'+Math.random().toString(36).slice(2,6);
+      document.getElementById('mode').value=t.mode;
+      document.getElementById('params').value=t.combo
+        ? JSON.stringify({combo:t.combo},null,2)
+        : JSON.stringify(t.params,null,2);
+      toast('已填充「'+t.name+'」— 改名后提交');
+      document.getElementById('name').focus();document.getElementById('name').select();
+    };
+    box.appendChild(d);
+  });
+}
+async function submitStrategy(){
+  const btn=document.getElementById('submitBtn');
+  const m=document.getElementById('msg');
+  try{
+    let params={},combo=undefined;
+    const raw=document.getElementById('params').value.trim();
+    if(raw){const p=JSON.parse(raw.replace(/^\/\/.*$/gm,''));if(p.combo){combo=p.combo;params=p.params||{}}else params=p}
+    const body={name:document.getElementById('name').value.trim(),author:document.getElementById('author').value.trim()||'anonymous',mode:document.getElementById('mode').value,params,combo};
+    if(!body.name){m.className='show err';m.textContent='❌ 请先填策略名';return}
+    btn.disabled=true;btn.innerHTML='<span class="spin"></span>验证中 10~30s';
+    m.className='show';m.textContent='正在跑三重回测验证……';
+    const r=await fetch('/api/strategies',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    const d=await r.json();
+    if(!r.ok){m.className='show err';m.textContent='❌ '+(d.error||JSON.stringify(d));return}
+    if(d.pass){
+      m.className='show ok';
+      m.textContent=`✅ 通过！全样本 ${(+d.full_return_pct).toFixed(1)}% · PF ${(+d.full_pf).toFixed(2)} · 前半 ${(+d.half_return_pct).toFixed(1)}%\n去仪表盘看实时表现 →`;
+      toast('🚀 '+body.name+' 已上线');
+    }else{
+      m.className='show err';
+      m.textContent=`❌ 被拒收：${d.reasons.join('；')}\n全样本 ${(+d.full_return_pct).toFixed(1)}% · PF ${(+d.full_pf).toFixed(2)}`;
+    }
+  }catch(e){m.className='show err';m.textContent='❌ '+e}
+  finally{btn.disabled=false;btn.textContent='🚀 提交并验证'}
+}
+renderTemplates();
+</script>
+</body>
+</html>

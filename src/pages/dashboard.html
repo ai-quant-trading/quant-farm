@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>仪表盘 · Quant Farm</title>
+<style>{{CSS}}</style>
+</head>
+<body>
+<header><div class="wrap"><div class="nav">
+  <div class="logo">🌾</div>
+  <div class="brand">Quant Farm<small>STRATEGY FARM · PROOF OF ALPHA</small></div>
+  <div class="tabs">
+    <a class="tab active" href="/">📊 仪表盘</a>
+    <a class="tab" href="/submit">📝 策略中心</a>
+  </div>
+  <div class="live"><span class="dot"></span>10s</div>
+</div></div></header>
+
+<div class="wrap">
+<div class="stats">
+  <div class="stat"><div class="glow"></div><div class="k">策略总数</div><div class="v" id="st-total">—</div></div>
+  <div class="stat"><div class="k">活跃账本</div><div class="v" id="st-active">—</div></div>
+  <div class="stat"><div class="k">最佳收益</div><div class="v pos" id="st-best">—</div></div>
+  <div class="stat"><div class="k">最差收益</div><div class="v neg" id="st-worst">—</div></div>
+</div>
+
+<h2 class="sec">全部策略 <span style="font-weight:400;text-transform:none;color:var(--dim)">(点击行看详情 · 🎯选为生产)</span></h2>
+<div class="board-card">
+  <table id="board"><thead><tr>
+    <th>策略</th><th>状态</th><th>曲线</th><th style="text-align:right">净值</th>
+    <th style="text-align:right">收益%</th><th style="text-align:right">回撤%</th>
+    <th style="text-align:right">闭环/胜率</th><th style="text-align:right">PF</th><th>备注</th><th style="text-align:right">操作</th>
+  </tr></thead><tbody></tbody></table>
+  <div class="empty" id="empty" style="display:none"><div style="font-size:34px;margin-bottom:10px;opacity:.5">🌱</div>
+  还没有策略——去<a href="/submit" style="color:var(--blue)">策略中心</a>提交第一个</div>
+</div>
+</div>
+
+<div class="modal-bg" id="modal-bg" onclick="if(event.target===this)closeDetail()">
+  <button class="icon-btn mclose" onclick="closeDetail()">✕ 关闭</button>
+  <div class="modal" id="modal-body"></div>
+</div>
+<div class="toast" id="toast"></div>
+<footer>Quant Farm · <a href="https://github.com/ai-quant-trading/quant-farm">GitHub</a> · 策略必须证明自己的 Alpha</footer>
+
+<script>
+function toast(t){const e=document.getElementById('toast');e.textContent=t;e.classList.add('show');clearTimeout(e._h);e._h=setTimeout(()=>e.classList.remove('show'),2600)}
+function fmt(v){return(v===undefined||v===null||v==='')?'—':(+v).toFixed(2)}
+function sparkline(curve){
+  if(!Array.isArray(curve)||curve.length<2)return '<span style="color:var(--dim);font-size:11px">—</span>';
+  const pts=curve.map(c=>[c[0],+c[1]]);const eqs=pts.map(p=>p[1]);
+  const min=Math.min(...eqs),max=Math.max(...eqs);
+  const W=110,H=28,span=(max-min)||1;
+  const path=pts.map((p,i)=>{const x=(i/(pts.length-1))*W;const y=H-3-((p[1]-min)/span)*(H-6);return(i===0?'M':'L')+x.toFixed(1)+','+y.toFixed(1)}).join(' ');
+  const up=eqs[eqs.length-1]>=eqs[0];
+  const area=path+' L'+W+','+H+' L0,'+H+' Z';
+  return `<svg class="spark" viewBox="0 0 ${W} ${H}"><path d="${area}" fill="${up?'rgba(52,211,153,.13)':'rgba(248,113,113,.13)'}"/><path class="line" d="${path}" stroke="${up?'var(--green)':'var(--red)'}"/></svg>`;
+}
+async function refresh(){
+  try{
+    const r=await fetch('/api/strategies');const d=await r.json();const rows=d.strategies||[];
+    const active=rows.filter(s=>s.status==='active'&&!s.is_production);
+    document.getElementById('st-total').textContent=rows.length;
+    document.getElementById('st-active').textContent=active.length;
+    const rets=active.map(s=>+s.return_pct||0);
+    document.getElementById('st-best').textContent=rets.length?Math.max(...rets).toFixed(2)+'%':'—';
+    document.getElementById('st-worst').textContent=rets.length?Math.min(...rets).toFixed(2)+'%':'—';
+    const tb=document.querySelector('#board tbody');tb.innerHTML='';
+    document.getElementById('empty').style.display=rows.length?'none':'block';
+    rows.sort((a,b)=>((+b.return_pct||-999)-(+a.return_pct||-999))).forEach(s=>{
+      const ret=s.return_pct!==undefined?+s.return_pct:null;
+      const retCls=ret===null?'':(ret>=0?'pos':'neg');
+      const reasons=Array.isArray(s.reasons)?s.reasons.join('；'):'';
+      const tr=document.createElement('tr');
+      const barPct=ret===null?0:Math.min(Math.abs(ret)/40*100,100);
+      const isProd=!!s.is_production;
+      tr.className=(isProd?'prod-row ':'clickable ')+(s.status||'active');
+      tr.onclick=()=>openDetail(isProd?'__production__':s.name);
+      tr.innerHTML=`
+        <td class="name-cell">${isProd?'生产账本':s.name}<small>${s.author||''} · ${s.mode||''}</small></td>
+        <td><span class="pill ${s.status}">${({active:"运行中",rejected:"已拒收",archived:"已下线"})[s.status]||s.status}</span></td>
+        <td>${sparkline(s.curve)}</td>
+        <td style="text-align:right">${fmt(s.equity)}</td>
+        <td style="text-align:right"><span class="${retCls}">${ret===null?'—':ret.toFixed(2)+'%'}</span>
+            ${ret!==null?`<div class="bar"><i style="width:${barPct}%;background:${ret>=0?'var(--green)':'var(--red)'}"></i></div>`:''}</td>
+        <td style="text-align:right">${fmt(s.drawdown_pct)}</td>
+        <td style="text-align:right">${s.trades??0} / ${fmt(s.win_rate_pct)}%</td>
+        <td style="text-align:right">${fmt(s.profit_factor)}</td>
+        <td class="reasons">${reasons}</td>
+        <td style="white-space:nowrap;text-align:right">
+          ${s.status==='active'&&!isProd?`<button class="icon-btn" style="color:var(--green);border-color:rgba(52,211,153,.5)" onclick="event.stopPropagation();promote('${s.name}',${(+s.trades||0)<20})">🎯 选为生产</button> `:''}
+          ${(s.status==='active'||s.status==='rejected')&&!isProd?`<button class="icon-btn" onclick="event.stopPropagation();del('${s.name}')">下线</button>`:''}
+        </td>`;
+      tb.appendChild(tr);
+    });
+  }catch(e){console.error(e)}
+}
+async function openDetail(name){
+  try{
+    const r=await fetch('/api/strategies/'+encodeURIComponent(name));
+    if(!r.ok){toast('详情获取失败');return}
+    const d=await r.json();const s=d.status||{};
+    const curve=d.curve||[];
+    const trades=(d.trades||[]).map(t=>`<tr><td>${t.symbol}</td><td class="${t.side==='LONG'?'pos':'neg'}">${t.side}</td><td class="mono">${t.entry}</td><td class="mono">${t.exit}</td><td class="${+t.net>=0?'pos':'neg'} mono">${(+t.net).toFixed(3)}U</td><td class="mono">${(+t.r).toFixed(2)}R</td><td style="color:var(--muted);font-size:10.5px">${t.reason}</td></tr>`).join('');
+    const val=d.validation;
+    document.getElementById('modal-body').innerHTML=`
+      <h3>${name==='__production__'?'★ 生产账本':s.name}<span class="pill ${s.status}">${({active:"运行中",rejected:"已拒收",archived:"已下线"})[s.status]||s.status}</span></h3>
+      <div class="sub">${name==='__production__'?'生产主账本':((d.spec&&(d.spec.author+' · '+d.spec.mode))||'')}</div>
+      <div class="chart-box">${bigChart(curve,s.initial_equity)}</div>
+      <div class="mstats">
+        <div class="mstat"><div class="k">净值</div><div class="v">${fmt(s.equity)}U</div></div>
+        <div class="mstat"><div class="k">收益率</div><div class="v ${(+s.return_pct)>=0?'pos':'neg'}">${fmt(s.return_pct)}%</div></div>
+        <div class="mstat"><div class="k">最大回撤</div><div class="v">${fmt(s.drawdown_pct)}%</div></div>
+        <div class="mstat"><div class="k">闭环/胜率</div><div class="v">${s.trades??0} · ${fmt(s.win_rate_pct)}%</div></div>
+        <div class="mstat"><div class="k">PF</div><div class="v">${fmt(s.profit_factor)}</div></div>
+        ${val?`<div class="mstat"><div class="k">验证门</div><div class="v ${val.pass?'pos':'neg'}" style="font-size:13px">${val.pass?'通过':'拒收'}</div></div>`:''}
+      </div>
+      ${trades?`<table class="trade-tbl"><thead><tr><th>币种</th><th>方向</th><th>开仓</th><th>平仓</th><th>净盈亏</th><th>R</th><th>出场原因</th></tr></thead><tbody>${trades}</tbody></table>`:''}
+      ${val&&!val.pass?`<div style="margin-top:12px;font-size:12px;color:var(--red)">拒收：${(val.reasons||[]).join('；')}</div>`:''}
+    `;
+    document.getElementById('modal-bg').classList.add('show');
+  }catch(e){toast('详情: '+e)}
+}
+function bigChart(curve,initial){
+  if(!Array.isArray(curve)||curve.length<2)return '<div style="padding:20px;text-align:center;color:var(--dim)">暂无曲线</div>';
+  const pts=curve.map(c=>[c[0],+c[1]]);const eqs=pts.map(p=>p[1]);
+  const min=Math.min(...eqs,+initial||Infinity),max=Math.max(...eqs,+initial||-Infinity);
+  const W=760,H=220,pad=8,span=(max-min)||1;
+  const x=i=>pad+(i/(pts.length-1))*(W-2*pad);const y=v=>H-pad-((v-min)/span)*(H-2*pad);
+  const path=pts.map((p,i)=>(i?'L':'M')+x(i).toFixed(1)+','+y(p[1]).toFixed(1)).join(' ');
+  const up=eqs[eqs.length-1]>=(+initial||eqs[0]);
+  const area=path+` L${x(pts.length-1).toFixed(1)},${H-pad} L${pad},${H-pad} Z`;
+  const grid=[.25,.5,.75].map(g=>`<line x1="${pad}" y1="${(H-2*pad)*g+pad}" x2="${W-pad}" y2="${(H-2*pad)*g+pad}" stroke="rgba(148,163,184,.1)"/>`).join('');
+  const labels=`<text x="${pad+4}" y="${y(max)+12}" fill="#5b6a80" font-size="10">${max.toFixed(1)}U</text><text x="${pad+4}" y="${y(min)-4}" fill="#5b6a80" font-size="10">${min.toFixed(1)}U</text>`;
+  const zero=(+initial&&initial<=max&&initial>=min)?`<line x1="${pad}" y1="${y(+initial)}" x2="${W-pad}" y2="${y(+initial)}" stroke="rgba(148,163,184,.3)" stroke-dasharray="4 4"/>`:'';
+  return `<svg viewBox="0 0 ${W} ${H}" style="width:100%">${grid}${zero}<path d="${area}" fill="${up?'rgba(52,211,153,.14)':'rgba(248,113,113,.14)'}"/><path d="${path}" fill="none" stroke="${up?'#34d399':'#f87171'}" stroke-width="2"/>${labels}</svg>`;
+}
+function closeDetail(){document.getElementById('modal-bg').classList.remove('show')}
+document.addEventListener('keydown',e=>{if(e.key==='Escape')closeDetail()});
+async function promote(name,below){
+  const w=below?`\n⚠️ 仅少量闭环，未达20笔建议门槛。`:'';
+  if(!confirm(`确定将「${name}」选为生产策略？${w}\n\n参数写入 settings.toml，重启后生效`))return;
+  try{const r=await fetch('/api/strategies/'+encodeURIComponent(name)+'/promote',{method:'POST'});const d=await r.json();
+    if(!r.ok){toast('❌ '+(d.error||d));return}toast('🎯 '+name+' 已选为生产！重启后生效');
+  }catch(e){toast('❌ '+e)}
+}
+async function del(name){await fetch('/api/strategies/'+name,{method:'DELETE'});toast('已下线 '+name);refresh()}
+refresh();setInterval(refresh,10000);
+</script>
+</body>
+</html>
