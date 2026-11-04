@@ -132,5 +132,257 @@
       "validated_at": "2026-11-04T12:49:57.646307+00:00"
     },
     "submitted_at": "2026-11-04T12:49:57.646342+00:00"
+  },
+  {
+    "spec": {
+      "name": "g3_02_champion_variant",
+      "author": "curator",
+      "mode": "long_only_breakout",
+      "params": {
+        "breakeven_r_mult": "1.4",
+        "chandelier_atr_mult": "3.3",
+        "regime_adx_threshold": "20.5",
+        "time_stop_bars": 22,
+        "volume_surge_mult": "1.35",
+        "donchian_period": 24,
+        "initial_stop_atr_mult": "2.2"
+      },
+      "universe": null,
+      "initial_equity": "100"
+    },
+    "status": "rejected",
+    "validation": {
+      "spec_name": "g3_02_champion_variant",
+      "pass": false,
+      "reasons": [
+        "前半样本净利 -11.52 <= 0（边际不稳定）"
+      ],
+      "full_return_pct": "13.077078435000000",
+      "full_pf": "1.2459826061465041402625898448",
+      "full_trades": 84,
+      "half_return_pct": "-11.527654984000000",
+      "half_pf": "0.5607300490785943259930587994",
+      "cost15_equity": "110.835399145000000",
+      "validated_at": "2026-11-04T12:51:30.236951+00:00"
+    },
+    "submitted_at": "2026-11-04T12:51:30.236965+00:00"
+  },
+  {
+    "spec": {
+      "name": "g3_01_wide_donchian",
+      "author": "curator",
+      "mode": "long_only_breakout",
+      "params": {
+        "breakeven_r_mult": "1.4",
+        "initial_stop_atr_mult": "2.2",
+        "volume_surge_mult": "1.35",
+        "donchian_period": 24,
+        "time_stop_bars": 22,
+        "chandelier_atr_mult": "3.6"
+      },
+      "universe": null,
+      "initial_equity": "100"
+    },
+    "status": "rejected",
+    "validation": {
+      "spec_name": "g3_01_wide_donchian",
+      "pass": false,
+      "reasons": [
+        "前半样本净利 -11.01 <= 0（边际不稳定）"
+      ],
+      "full_return_pct": "20.087152112000000",
+      "full_pf": "1.3398343948127376198895105312",
+      "full_trades": 86,
+      "half_return_pct": "-11.010625982000000",
+      "half_pf": "0.6069742267247723237937176423",
+      "cost15_equity": "117.695786532000000",
+      "validated_at": "2026-11-04T12:51:34.045989+00:00"
+    },
+    "submitted_at": "2026-11-04T12:51:34.046003+00:00"
+  },
+  {
+    "spec": {
+      "name": "router_tight_bear",
+      "author": "curator",
+      "mode": "regime_router",
+      "params": {
+        "bear_tp_atr": "4.0",
+        "bear_stop_atr": "2.5"
+      },
+      "universe": null,
+      "initial_equity": "100"
+    },
+    "status": "active",
+    "validation": {
+      "spec_name": "router_tight_bear",
+      "pass": true,
+      "reasons": [
+        "全部门槛通过"
+      ],
+      "full_return_pct": "46.704816061000000",
+      "full_pf": "1.486697118435714844982441862",
+      "full_trades": 265,
+      "half_return_pct": "1.446292187000000",
+      "half_pf": "1.0320577703491960497828185852",
+      "cost15_equity": "141.487254608500000",
+      "validated_at": "2026-11-04T12:51:38.200654+00:00"
+    },
+    "submitted_at": "2026-11-04T12:51:38.204301+00:00"
+  },
+  {
+    "spec": {
+      "name": "router_strong_adx",
+      "author": "curator",
+      "mode": "regime_router",
+      "params": {
+        "bear_stop_atr": "3.0",
+        "bear_tp_atr": "4.0",
+        "regime_adx_threshold": "22"
+      },
+      "universe": null,
+      "initial_equity": "100"
+    },
+    "status": "active",
+    "validation": {
+      "spec_name": "router_strong_adx",
+      "pass": true,
+      "reasons": [
+        "全部门槛通过"
+      ],
+      "full_return_pct": "44.828336337000000",
+      "full_pf": "1.5382942362352551318059529497",
+      "full_trades": 242,
+      "half_return_pct": "1.104756931000000",
+      "half_pf": "1.0307202314096870146844344535",
+      "cost15_equity": "140.313007914500000",
+      "validated_at": "2026-11-04T12:51:42.412652+00:00"
+    },
+    "submitted_at": "2026-11-04T12:51:42.417730+00:00"
+  },
+  {
+    "spec": {
+      "name": "bear_wide_tp45",
+      "author": "curator",
+      "mode": "bear_short",
+      "params": {
+        "bear_maturity_bars": 36,
+        "bear_stop_atr": "2.5",
+        "bear_tp_atr": "4.5"
+      },
+      "universe": null,
+      "initial_equity": "100"
+    },
+    "status": "rejected",
+    "validation": {
+      "spec_name": "bear_wide_tp45",
+      "pass": false,
+      "reasons": [
+        "全样本 PF 0.94 <= 1.1",
+        "全样本净利 -1.78 <= 0",
+        "成本×1.5 后净利翻负（成本敏感）"
+      ],
+      "full_return_pct": "-1.783203064000000",
+      "full_pf": "0.9444917778972190378798539411",
+      "full_trades": 137,
+      "half_return_pct": "2.819315318000000",
+      "half_pf": "1.1638032797160897430086429969",
+      "cost15_equity": "96.591621403500000",
+      "validated_at": "2026-11-04T12:51:46.633489+00:00"
+    },
+    "submitted_at": "2026-11-04T12:51:46.633756+00:00"
+  },
+  {
+    "spec": {
+      "name": "bear_rejection_wide",
+      "author": "curator",
+      "mode": "bear_short",
+      "params": {
+        "bear_entry_variant": "rejection",
+        "bear_stop_atr": "3.0",
+        "bear_tp_atr": "4.5"
+      },
+      "universe": null,
+      "initial_equity": "100"
+    },
+    "status": "active",
+    "validation": {
+      "spec_name": "bear_rejection_wide",
+      "pass": true,
+      "reasons": [
+        "全部门槛通过"
+      ],
+      "full_return_pct": "2.775128141000000",
+      "full_pf": "1.1095044372785322490531275816",
+      "full_trades": 135,
+      "half_return_pct": "2.579757354000000",
+      "half_pf": "1.2134884269700213367914327525",
+      "cost15_equity": "101.196059968500000",
+      "validated_at": "2026-11-04T12:51:51.202570+00:00"
+    },
+    "submitted_at": "2026-11-04T12:51:51.209937+00:00"
+  },
+  {
+    "spec": {
+      "name": "bear_fast_maturity",
+      "author": "curator",
+      "mode": "bear_short",
+      "params": {
+        "bear_maturity_bars": 12,
+        "bear_stop_atr": "2.5",
+        "bear_tp_atr": "4.0"
+      },
+      "universe": null,
+      "initial_equity": "100"
+    },
+    "status": "active",
+    "validation": {
+      "spec_name": "bear_fast_maturity",
+      "pass": true,
+      "reasons": [
+        "全部门槛通过"
+      ],
+      "full_return_pct": "6.494596658000000",
+      "full_pf": "1.1217795340414303169678221784",
+      "full_trades": 230,
+      "half_return_pct": "9.676799521000000",
+      "half_pf": "1.355008114269442232736959374",
+      "cost15_equity": "103.384022485500000",
+      "validated_at": "2026-11-04T12:51:55.342966+00:00"
+    },
+    "submitted_at": "2026-11-04T12:51:55.346747+00:00"
+  },
+  {
+    "spec": {
+      "name": "lo_classic_v2",
+      "author": "curator",
+      "mode": "long_only_breakout",
+      "params": {
+        "initial_stop_atr_mult": "2.0",
+        "donchian_period": 20,
+        "volume_surge_mult": "1.4",
+        "chandelier_atr_mult": "3.5"
+      },
+      "universe": null,
+      "initial_equity": "100"
+    },
+    "status": "rejected",
+    "validation": {
+      "spec_name": "lo_classic_v2",
+      "pass": false,
+      "reasons": [
+        "全样本 PF 0.71 <= 1.1",
+        "全样本净利 -10.90 <= 0",
+        "前半样本净利 -6.79 <= 0（边际不稳定）",
+        "成本×1.5 后净利翻负（成本敏感）"
+      ],
+      "full_return_pct": "-10.908270438000000",
+      "full_pf": "0.7198596200673835357311720653",
+      "full_trades": 68,
+      "half_return_pct": "-6.794037155000000",
+      "half_pf": "0.7330103666738500501422102012",
+      "cost15_equity": "87.221197189500000",
+      "validated_at": "2026-11-04T12:51:58.488771+00:00"
+    },
+    "submitted_at": "2026-11-04T12:51:58.488788+00:00"
   }
 ]
