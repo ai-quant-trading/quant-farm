@@ -836,150 +836,323 @@ const INDEX_HTML: &str = r#"<!DOCTYPE html>
 <html lang="zh">
 <head>
 <meta charset="utf-8">
-<title>Coin-AI 策略农场</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Quant Farm · 策略农场</title>
 <style>
-  body { font-family: -apple-system, "PingFang SC", sans-serif; margin: 24px; background: #0f172a; color: #e2e8f0; }
-  h1 { font-size: 20px; } h2 { font-size: 16px; margin-top: 28px; }
-  table { border-collapse: collapse; width: 100%; margin-top: 10px; font-size: 13px; }
-  th, td { border: 1px solid #334155; padding: 6px 10px; text-align: left; }
-  th { background: #1e293b; }
-  tr.active { color: #4ade80; } tr.rejected { color: #f87171; } tr.archived { color: #64748b; }
-  input, select, textarea { background: #1e293b; color: #e2e8f0; border: 1px solid #334155; padding: 6px; border-radius: 4px; width: 320px; box-sizing: border-box; }
-  textarea { width: 660px; height: 150px; font-family: monospace; font-size: 12px; }
-  button { background: #2563eb; color: white; border: none; padding: 8px 20px; border-radius: 4px; cursor: pointer; margin-top: 8px; }
-  button.sec { background: #334155; padding: 6px 14px; font-size: 12px; }
-  #msg { margin-top: 10px; font-size: 13px; white-space: pre-wrap; }
-  .badge { padding: 1px 8px; border-radius: 10px; font-size: 11px; }
-  .tpl { display: inline-block; border: 1px solid #334155; border-radius: 6px; padding: 10px 12px; margin: 4px 6px 4px 0; cursor: pointer; font-size: 13px; background: #1e293b; }
-  .tpl:hover { border-color: #2563eb; }
-  .tpl small { display: block; color: #94a3b8; margin-top: 4px; max-width: 300px; }
-  details { margin-top: 12px; font-size: 13px; }
-  summary { cursor: pointer; color: #7dd3fc; }
-  code { background: #1e293b; padding: 1px 5px; border-radius: 3px; font-size: 12px; }
-  pre { background: #1e293b; padding: 10px; border-radius: 6px; overflow-x: auto; font-size: 12px; }
+:root {
+  --bg: #070b14; --bg2: #0c1220;
+  --card: rgba(148,163,184,.05); --card-hover: rgba(148,163,184,.09);
+  --border: rgba(148,163,184,.13); --border-hi: rgba(148,163,184,.25);
+  --text: #e6edf7; --muted: #8b98ad; --dim: #5b6a80;
+  --blue: #3b82f6; --violet: #8b5cf6; --cyan: #22d3ee;
+  --green: #34d399; --red: #f87171; --amber: #fbbf24;
+  --grad: linear-gradient(135deg,#3b82f6,#8b5cf6);
+  --grad-soft: linear-gradient(135deg,rgba(59,130,246,.12),rgba(139,92,246,.12));
+}
+* { box-sizing: border-box; margin: 0; }
+html { background: var(--bg); }
+body {
+  font-family: "Inter","SF Pro Display","PingFang SC",-apple-system,sans-serif;
+  background:
+    radial-gradient(1200px 500px at 80% -10%, rgba(59,130,246,.10), transparent 60%),
+    radial-gradient(900px 400px at 10% 0%, rgba(139,92,246,.08), transparent 55%),
+    var(--bg);
+  color: var(--text); min-height: 100vh; padding: 0 0 60px;
+}
+.wrap { max-width: 1280px; margin: 0 auto; padding: 0 28px; }
+
+/* ---------- header ---------- */
+header { border-bottom: 1px solid var(--border); backdrop-filter: blur(10px); position: sticky; top: 0; z-index: 10; background: rgba(7,11,20,.75); }
+.nav { display: flex; align-items: center; gap: 14px; padding: 16px 0; }
+.logo { width: 34px; height: 34px; border-radius: 10px; background: var(--grad); display: flex; align-items: center; justify-content: center; font-size: 17px; box-shadow: 0 4px 18px rgba(99,102,241,.35); }
+.brand { font-size: 16px; font-weight: 700; letter-spacing: .2px; }
+.brand small { display: block; font-size: 11px; color: var(--muted); font-weight: 500; letter-spacing: .5px; }
+.live { margin-left: auto; display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); background: var(--card); border: 1px solid var(--border); padding: 6px 14px; border-radius: 99px; }
+.live .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); box-shadow: 0 0 0 0 rgba(52,211,153,.6); animation: pulse 2s infinite; }
+@keyframes pulse { 70% { box-shadow: 0 0 0 8px rgba(52,211,153,0); } 100% { box-shadow: 0 0 0 0 rgba(52,211,153,0); } }
+
+/* ---------- stats ---------- */
+.stats { display: grid; grid-template-columns: repeat(auto-fit,minmax(200px,1fr)); gap: 14px; margin: 26px 0 8px; }
+.stat { background: var(--card); border: 1px solid var(--border); border-radius: 16px; padding: 18px 20px; position: relative; overflow: hidden; transition: border-color .2s; }
+.stat:hover { border-color: var(--border-hi); }
+.stat .k { font-size: 12px; color: var(--muted); letter-spacing: .4px; }
+.stat .v { font-size: 26px; font-weight: 700; margin-top: 6px; font-variant-numeric: tabular-nums; }
+.stat .v.pos { color: var(--green); } .stat .v.neg { color: var(--red); }
+.stat .glow { position: absolute; right: -20px; top: -20px; width: 90px; height: 90px; border-radius: 50%; background: var(--grad); opacity: .12; filter: blur(20px); }
+
+/* ---------- section titles ---------- */
+h2.sec { font-size: 14px; font-weight: 600; color: var(--muted); letter-spacing: 1.2px; text-transform: uppercase; margin: 34px 0 14px; display: flex; align-items: center; gap: 10px; }
+h2.sec::after { content: ""; flex: 1; height: 1px; background: var(--border); }
+h2.sec .num { background: var(--grad); color: white; width: 20px; height: 20px; border-radius: 6px; display: inline-flex; align-items: center; justify-content: center; font-size: 11px; }
+
+/* ---------- templates ---------- */
+.tpls { display: grid; grid-template-columns: repeat(auto-fill,minmax(280px,1fr)); gap: 12px; }
+.tpl { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 16px 18px; cursor: pointer; transition: all .18s ease; position: relative; }
+.tpl:hover { border-color: rgba(99,102,241,.55); background: var(--card-hover); transform: translateY(-2px); box-shadow: 0 8px 24px rgba(0,0,0,.35); }
+.tpl .t { font-weight: 650; font-size: 14px; display: flex; align-items: center; gap: 8px; }
+.tpl .d { font-size: 12px; color: var(--muted); margin-top: 6px; line-height: 1.55; }
+.tpl .tag { font-size: 10px; padding: 2px 8px; border-radius: 99px; font-weight: 600; }
+.tag.ok { background: rgba(52,211,153,.14); color: var(--green); }
+.tag.warn { background: rgba(251,191,36,.14); color: var(--amber); }
+.tpl .fill { position: absolute; right: 14px; bottom: 12px; font-size: 11px; color: var(--dim); opacity: 0; transition: opacity .15s; }
+.tpl:hover .fill { opacity: 1; color: var(--blue); }
+
+/* ---------- form card ---------- */
+.grid2 { display: grid; grid-template-columns: 420px 1fr; gap: 18px; align-items: start; }
+@media (max-width: 980px) { .grid2 { grid-template-columns: 1fr; } }
+.card { background: var(--card); border: 1px solid var(--border); border-radius: 16px; padding: 20px 22px; }
+.row { display: flex; gap: 10px; margin-bottom: 12px; flex-wrap: wrap; }
+.field { flex: 1; min-width: 110px; }
+.field label { display: block; font-size: 11px; color: var(--muted); margin-bottom: 5px; letter-spacing: .3px; }
+input, select, textarea {
+  width: 100%; background: rgba(2,6,17,.6); color: var(--text); border: 1px solid var(--border);
+  padding: 9px 12px; border-radius: 10px; font-size: 13px; outline: none; transition: border-color .15s, box-shadow .15s;
+  font-family: inherit;
+}
+input:focus, select:focus, textarea:focus { border-color: var(--blue); box-shadow: 0 0 0 3px rgba(59,130,246,.15); }
+textarea { font-family: "SF Mono",ui-monospace,Menlo,monospace; font-size: 12px; height: 168px; resize: vertical; line-height: 1.6; }
+.btn { background: var(--grad); color: white; border: none; padding: 10px 22px; border-radius: 10px; cursor: pointer; font-size: 13px; font-weight: 600; transition: all .15s; box-shadow: 0 4px 16px rgba(99,102,241,.3); }
+.btn:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 6px 22px rgba(99,102,241,.45); }
+.btn:disabled { opacity: .55; cursor: wait; }
+.btn.ghost { background: var(--card); border: 1px solid var(--border); box-shadow: none; font-weight: 500; }
+.btn.ghost:hover { border-color: var(--border-hi); box-shadow: none; }
+.spin { display: inline-block; width: 12px; height: 12px; border: 2px solid rgba(255,255,255,.35); border-top-color: white; border-radius: 50%; animation: rot .7s linear infinite; vertical-align: -2px; margin-right: 6px; }
+@keyframes rot { to { transform: rotate(360deg); } }
+#msg { margin-top: 12px; font-size: 12.5px; line-height: 1.6; border-radius: 10px; padding: 0; transition: all .2s; white-space: pre-wrap; }
+#msg.show { padding: 12px 14px; border: 1px solid var(--border); background: rgba(2,6,17,.5); }
+#msg.ok { border-color: rgba(52,211,153,.4); color: var(--green); }
+#msg.err { border-color: rgba(248,113,113,.4); color: var(--red); }
+#curlbox { display: none; margin-top: 10px; background: rgba(2,6,17,.7); border: 1px solid var(--border); padding: 12px; border-radius: 10px; overflow-x: auto; font-size: 11.5px; font-family: "SF Mono",ui-monospace,Menlo,monospace; color: #a5b4fc; }
+
+/* ---------- leaderboard ---------- */
+.board-card { background: var(--card); border: 1px solid var(--border); border-radius: 16px; overflow: hidden; }
+table { border-collapse: collapse; width: 100%; font-size: 13px; }
+thead th { text-align: left; font-size: 11px; color: var(--muted); font-weight: 600; letter-spacing: .5px; padding: 12px 14px; border-bottom: 1px solid var(--border); background: rgba(2,6,17,.35); position: sticky; top: 0; }
+tbody td { padding: 11px 14px; border-bottom: 1px solid rgba(148,163,184,.07); font-variant-numeric: tabular-nums; }
+tbody tr { transition: background .12s; }
+tbody tr:hover { background: rgba(148,163,184,.05); }
+tbody tr:last-child td { border-bottom: none; }
+.pill { font-size: 11px; font-weight: 600; padding: 3px 10px; border-radius: 99px; display: inline-flex; align-items: center; gap: 5px; }
+.pill::before { content: ""; width: 6px; height: 6px; border-radius: 50%; }
+.pill.active { background: rgba(52,211,153,.13); color: var(--green); } .pill.active::before { background: var(--green); }
+.pill.rejected { background: rgba(248,113,113,.13); color: var(--red); } .pill.rejected::before { background: var(--red); }
+.pill.archived { background: rgba(148,163,184,.13); color: var(--muted); } .pill.archived::before { background: var(--muted); }
+.pos { color: var(--green); } .neg { color: var(--red); }
+.mono { font-family: "SF Mono",ui-monospace,Menlo,monospace; font-size: 12px; }
+.name-cell { font-weight: 650; }
+.name-cell small { display: block; color: var(--dim); font-weight: 400; font-size: 11px; margin-top: 2px; }
+.bar { height: 4px; border-radius: 4px; background: rgba(148,163,184,.15); margin-top: 5px; overflow: hidden; width: 80px; }
+.bar > i { display: block; height: 100%; border-radius: 4px; }
+.reasons { max-width: 260px; font-size: 11.5px; color: var(--muted); line-height: 1.5; }
+.icon-btn { background: none; border: 1px solid var(--border); color: var(--muted); border-radius: 8px; padding: 4px 10px; cursor: pointer; font-size: 11px; transition: all .15s; }
+.icon-btn:hover { color: var(--red); border-color: rgba(248,113,113,.5); }
+.empty { padding: 46px 20px; text-align: center; color: var(--dim); font-size: 13px; }
+.empty .big { font-size: 34px; margin-bottom: 10px; opacity: .5; }
+
+details.help { margin-top: 14px; border: 1px solid var(--border); border-radius: 14px; background: var(--card); overflow: hidden; }
+details.help summary { cursor: pointer; padding: 13px 18px; font-size: 13px; color: var(--muted); list-style: none; display: flex; align-items: center; gap: 8px; }
+details.help summary::before { content: "▸"; transition: transform .15s; color: var(--blue); }
+details.help[open] summary::before { transform: rotate(90deg); }
+details.help .inner { padding: 0 18px 16px; font-size: 12.5px; }
+details.help table { font-size: 12px; }
+details.help code { background: rgba(59,130,246,.12); color: #93c5fd; padding: 1px 6px; border-radius: 5px; font-size: 11px; font-family: "SF Mono",ui-monospace,Menlo,monospace; }
+.legend { font-size: 11.5px; color: var(--dim); margin-top: 10px; }
+footer { text-align: center; margin-top: 46px; color: var(--dim); font-size: 11.5px; }
+footer a { color: var(--muted); text-decoration: none; }
+footer a:hover { color: var(--blue); }
+.toast { position: fixed; bottom: 24px; right: 24px; background: #131a2b; border: 1px solid var(--border-hi); border-radius: 12px; padding: 12px 18px; font-size: 13px; box-shadow: 0 10px 34px rgba(0,0,0,.5); opacity: 0; transform: translateY(8px); transition: all .25s; pointer-events: none; }
+.toast.show { opacity: 1; transform: translateY(0); }
 </style>
 </head>
 <body>
-<h1>🌾 Coin-AI 策略农场</h1>
-<p style="color:#94a3b8;font-size:13px">提交参数化策略 → 自动验证门（全样本 PF&gt;1.1 + 前半样本为正 + 成本×1.5 存活）→ 通过即开零资金账本并行。风控参数不可覆盖，所有账本独立熔断。完整文档见仓库 <code>docs/strategy-guide.md</code>。</p>
 
-<h2>① 选模板（点击一键填充，然后改名字微调参数）</h2>
-<div id="tpls"></div>
+<header><div class="wrap"><div class="nav">
+  <div class="logo">🌾</div>
+  <div class="brand">Quant Farm<small>STRATEGY FARM · PROOF OF ALPHA</small></div>
+  <div class="live"><span class="dot"></span>实时运行中 · 每 10s 刷新</div>
+</div></div></header>
 
-<h2>② 提交</h2>
-<div>
-  <div style="margin:4px 0">名称 <input id="name" placeholder="my_bear_v2"> 作者 <input id="author" placeholder="你的名字" style="width:120px">
-  模式 <select id="mode">
-    <option value="bear_short">bear_short 熊市空头</option>
-    <option value="long_only_breakout">long_only_breakout 多头突破</option>
-    <option value="chop_mean_reversion">chop_mean_reversion 震荡回归</option>
-    <option value="regime_router">regime_router 状态路由</option>
-  </select></div>
-  <div style="margin:8px 0 4px;color:#94a3b8;font-size:12px">参数 JSON（白名单见下方速查表；字符串数字都要带引号，整数不用）</div>
-  <textarea id="params" spellcheck="false"></textarea>
-  <div>
-    <button onclick="submitStrategy()">🚀 提交并验证（约 10~30 秒）</button>
-    <button class="sec" onclick="copyCurl()">📋 复制 curl 命令</button>
-    <button class="sec" onclick="fillCurl()">生成 curl 到下方</button>
-  </div>
-  <div id="msg"></div>
-  <pre id="curlbox" style="display:none"></pre>
+<div class="wrap">
+
+<div class="stats">
+  <div class="stat"><div class="glow"></div><div class="k">提交策略总数</div><div class="v" id="st-total">—</div></div>
+  <div class="stat"><div class="k">活跃账本</div><div class="v" id="st-active">—</div></div>
+  <div class="stat"><div class="k">最佳收益</div><div class="v pos" id="st-best">—</div></div>
+  <div class="stat"><div class="k">最差收益</div><div class="v neg" id="st-worst">—</div></div>
 </div>
 
-<details>
-<summary>📐 参数速查表（点击展开全部 25 个白名单参数）</summary>
+<h2 class="sec"><span class="num">1</span>选择模板 · 一键填充</h2>
+<div class="tpls" id="tpls"></div>
+
+<h2 class="sec"><span class="num">2</span>提交策略</h2>
+<div class="grid2">
+  <div class="card">
+    <div class="row">
+      <div class="field"><label>策略名（唯一 · a-z0-9_-）</label><input id="name" placeholder="my_bear_v2"></div>
+      <div class="field" style="max-width:110px"><label>作者</label><input id="author" placeholder="名字"></div>
+    </div>
+    <div class="row">
+      <div class="field"><label>策略家族</label>
+      <select id="mode">
+        <option value="bear_short">🐻 bear_short · 熊市空头</option>
+        <option value="long_only_breakout">🐂 long_only · 牛市突破</option>
+        <option value="chop_mean_reversion">🔁 chop_mr · 震荡回归</option>
+        <option value="regime_router">🧭 regime_router · 状态路由</option>
+      </select></div>
+    </div>
+    <div class="field"><label>参数 JSON（白名单见下方速查）</label>
+    <textarea id="params" spellcheck="false">{
+  "bear_stop_atr": "2.5",
+  "bear_tp_atr": "4.0",
+  "bear_maturity_bars": 24
+}</textarea></div>
+    <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">
+      <button class="btn" id="submitBtn" onclick="submitStrategy()">🚀 提交并验证</button>
+      <button class="btn ghost" onclick="copyCurl()">📋 复制 curl</button>
+      <button class="btn ghost" onclick="fillCurl()">显示 curl</button>
+    </div>
+    <div id="msg"></div>
+    <pre id="curlbox"></pre>
+  </div>
+
+  <div>
+    <div class="board-card" id="board-wrap">
+      <table id="board">
+        <thead><tr>
+          <th>策略</th><th>状态</th><th style="text-align:right">净值</th><th style="text-align:right">收益</th>
+          <th style="text-align:right">回撤</th><th style="text-align:right">闭环</th><th style="text-align:right">胜率</th>
+          <th style="text-align:right">PF</th><th style="text-align:right">持仓</th><th>验证门备注</th><th></th>
+        </tr></thead>
+        <tbody></tbody>
+      </table>
+      <div class="empty" id="empty" style="display:none"><div class="big">🌱</div>还没有策略——选个模板提交第一个吧</div>
+    </div>
+    <p class="legend">💡 通过验证门的策略以<b>零资金账本</b>与生产并行；攒满 20 笔闭环且 PF&gt;1.1 才具备转正评估资格。所有账本共享生产风控纪律（单笔风险/熔断不可覆盖）。</p>
+  </div>
+</div>
+
+<details class="help">
+<summary>📐 参数速查 · 25 个白名单旋钮</summary>
+<div class="inner">
 <table>
-<tr><th>参数</th><th>含义</th><th>建议范围</th></tr>
-<tr><td><code>top_k_momentum</code></td><td>按动量取前 N 强/弱币</td><td>1-3</td></tr>
-<tr><td><code>donchian_period</code></td><td>突破通道回看小时数</td><td>16-30</td></tr>
-<tr><td><code>volume_surge_mult</code></td><td>放量确认倍数（别低于1.2！）</td><td>1.1-1.6</td></tr>
-<tr><td><code>atr_period</code></td><td>ATR 周期</td><td>10-20</td></tr>
-<tr><td><code>max_bias_pct</code></td><td>乖离上限（防追极端）</td><td>0.05-0.10</td></tr>
-<tr><td><code>regime_adx_threshold</code></td><td>趋势确认 ADX 门槛</td><td>18-25</td></tr>
-<tr><td><code>initial_stop_atr_mult</code></td><td>多头初始止损 ×ATR</td><td>1.8-2.8</td></tr>
-<tr><td><code>chandelier_atr_mult</code></td><td>吊灯移动止盈 ×ATR</td><td>2.5-4.0</td></tr>
-<tr><td><code>breakeven_r_mult</code></td><td>浮盈到 N R 保本移损</td><td>1.0-2.0</td></tr>
-<tr><td><code>time_stop_bars</code></td><td>多头时间止损（小时）</td><td>10-24</td></tr>
-<tr><td><code>time_stop_min_r</code></td><td>时间止损最低浮盈 R</td><td>0.2-0.6</td></tr>
-<tr><td><code>bear_stop_atr</code></td><td>空头止损（要比多头宽）</td><td>2.0-3.5</td></tr>
-<tr><td><code>bear_tp_atr</code></td><td>空头固定止盈（TP&gt;SL）</td><td>3.0-5.0</td></tr>
-<tr><td><code>bear_maturity_bars</code></td><td>熊市确认门槛（小时）</td><td>12-48</td></tr>
-<tr><td><code>bear_time_stop_bars</code></td><td>空头时间止损</td><td>8-16</td></tr>
-<tr><td><code>bear_entry_variant</code></td><td>breakdown / rejection / both</td><td>both</td></tr>
-<tr><td><code>bear_max_atr_percentile</code></td><td>危机护栏 ATR 分位上限</td><td>90-99</td></tr>
-<tr><td><code>min_atr_percentile</code></td><td>波动率过滤（0=关）</td><td>0 或 70+</td></tr>
-<tr><td><code>max_recent_move_bps</code></td><td>下单前波动闸门 bps</td><td>30</td></tr>
-<tr><td><code>chop_mr_*</code></td><td>震荡回归系列（见文档）</td><td>—</td></tr>
+<tr><td><code>top_k_momentum</code></td><td>动量选币取前 N</td><td>1-3</td><td><code>donchian_period</code></td><td>突破通道回看(小时)</td><td>16-30</td></tr>
+<tr><td><code>volume_surge_mult</code></td><td>放量确认倍数</td><td>1.1-1.6</td><td><code>atr_period</code></td><td>ATR 周期</td><td>10-20</td></tr>
+<tr><td><code>max_bias_pct</code></td><td>乖离上限防追高</td><td>0.05-0.10</td><td><code>regime_adx_threshold</code></td><td>趋势确认门槛</td><td>18-25</td></tr>
+<tr><td><code>initial_stop_atr_mult</code></td><td>多头止损 ×ATR</td><td>1.8-2.8</td><td><code>chandelier_atr_mult</code></td><td>吊灯止盈 ×ATR</td><td>2.5-4.0</td></tr>
+<tr><td><code>breakeven_r_mult</code></td><td>N R 保本移损</td><td>1.0-2.0</td><td><code>time_stop_bars</code></td><td>多头时间止损</td><td>10-24</td></tr>
+<tr><td><code>bear_stop_atr</code></td><td>空头止损（宽于多头）</td><td>2.0-3.5</td><td><code>bear_tp_atr</code></td><td>空头止盈 TP&gt;SL</td><td>3.0-5.0</td></tr>
+<tr><td><code>bear_maturity_bars</code></td><td>熊市确认小时数</td><td>12-48</td><td><code>bear_time_stop_bars</code></td><td>空头时间止损</td><td>8-16</td></tr>
+<tr><td><code>bear_entry_variant</code></td><td>breakdown/rejection/both</td><td>both</td><td><code>bear_max_atr_percentile</code></td><td>危机护栏分位</td><td>90-99</td></tr>
+<tr><td><code>min_atr_percentile</code></td><td>波动过滤(0=关)</td><td>0 或 70+</td><td><code>max_recent_move_bps</code></td><td>波动闸门 bps</td><td>30</td></tr>
+<tr><td><code>chop_mr_*</code></td><td>震荡回归系列参数</td><td>见文档</td><td colspan="3" style="color:var(--dim)">完整说明：<code>docs/strategy-guide.md</code></td></tr>
 </table>
+</div>
 </details>
 
-<details>
-<summary>⚠️ 验证门判例（实测踩坑，提交前自查）</summary>
-<ul style="font-size:13px;color:#cbd5e1">
-<li><b>去掉放量确认</b>（volume_surge 1.0）→ 414 笔亏 16%，假突破磨损</li>
-<li><b>止盈贴太近</b>（tp 0.5×ATR）→ 双边 0.2% 成本吃掉全部利润</li>
-<li><b>只对近期行情调参</b> → 前半样本门直接拒（两段都得为正）</li>
-<li><b>交易 &lt;10 笔</b> → 样本不足拒收</li>
-</ul>
+<details class="help">
+<summary>⚠️ 验证门判例 · 提交前自查（全部实测）</summary>
+<div class="inner">
+<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:10px">
+<div>🚫 <b>去掉放量确认</b>（volume_surge 1.0）→ 414 笔亏 16%，假突破磨损</div>
+<div>🚫 <b>止盈贴太近</b>（0.5×ATR）→ 0.2% 双边成本吃掉全部利润</div>
+<div>🚫 <b>只对近期调参</b> → 前半样本门直接拒（两段都得正）</div>
+<div>🚫 <b>交易 &lt;10 笔</b> → 样本不足拒收</div>
+</div>
+</div>
 </details>
 
-<h2>③ 排行榜（每 10 秒刷新）</h2>
-<table id="board"><thead><tr>
-  <th>策略</th><th>作者</th><th>模式</th><th>状态</th><th>净值</th><th>收益%</th><th>回撤%</th><th>闭环</th><th>胜率%</th><th>PF</th><th>持仓</th><th>备注</th><th></th>
-</tr></thead><tbody></tbody></table>
+<footer>Quant Farm · <a href="https://github.com/ai-quant-trading/quant-farm" target="_blank">github.com/ai-quant-trading/quant-farm</a> · 策略必须证明自己的 Alpha，才配动用资金</footer>
+</div>
+
+<div class="toast" id="toast"></div>
 
 <script>
 const TEMPLATES = [
-  {name: "空头·网格最优", desc: "验证门实测通过的最优空头参数（全样本 +5.8% PF 1.17）", mode: "bear_short",
-   params: {bear_stop_atr: "2.5", bear_tp_atr: "4.0", bear_maturity_bars: 24, bear_time_stop_bars: 10}},
-  {name: "空头·只做压破", desc: "只在放量跌破 20 期低点时做空（顺势追跌变体）", mode: "bear_short",
-   params: {bear_entry_variant: "breakdown", bear_stop_atr: "2.5", bear_tp_atr: "4.0"}},
-  {name: "空头·只做衰竭", desc: "只在反弹到均线附近阴线拒绝时做空（不追跌，等反弹死）", mode: "bear_short",
-   params: {bear_entry_variant: "rejection", bear_stop_atr: "3.0", bear_tp_atr: "4.0"}},
-  {name: "多头·冠军原版", desc: "12 个月 +34% 的现役冠军参数（改名字即可提交对照账本）", mode: "long_only_breakout",
-   params: {donchian_period: 20, initial_stop_atr_mult: "2.2", chandelier_atr_mult: "3.0", time_stop_bars: 16}},
-  {name: "路由·全天候", desc: "牛做多/熊做空自动切换（回测 +43% 回撤 13.9% 的组合模式）", mode: "regime_router",
-   params: {bear_stop_atr: "3.0", bear_tp_atr: "4.0"}},
-  {name: "震荡·实验用", desc: "⚠️ 历史全负，基本会被门拒——除非你有新想法", mode: "chop_mean_reversion",
-   params: {chop_mr_stretch_atr: "2.0", chop_mr_tp_atr: "0.8"}},
+  {icon:"🐻", name:"空头 · 网格最优", quality:"ok", qtext:"实测通过", desc:"验证门实测通过的最优空头参数（全样本 +5.8% · PF 1.17 · 前半样本为正）", mode:"bear_short",
+   params:{bear_stop_atr:"2.5", bear_tp_atr:"4.0", bear_maturity_bars:24, bear_time_stop_bars:10}},
+  {icon:"🐻", name:"空头 · 只做压破", quality:"ok", qtext:"变体", desc:"只在放量跌破 20 期低点时做空——顺势追跌，不接反弹", mode:"bear_short",
+   params:{bear_entry_variant:"breakdown", bear_stop_atr:"2.5", bear_tp_atr:"4.0"}},
+  {icon:"🐻", name:"空头 · 只做衰竭", quality:"ok", qtext:"变体", desc:"只在反弹至均线附近阴线拒绝时做空——不追跌，等反弹死", mode:"bear_short",
+   params:{bear_entry_variant:"rejection", bear_stop_atr:"3.0", bear_tp_atr:"4.0"}},
+  {icon:"🐂", name:"多头 · 冠军原版", quality:"ok", qtext:"现役冠军", desc:"12 个月 +34% 的现役冠军参数——改个名字即可提交对照账本", mode:"long_only_breakout",
+   params:{donchian_period:20, initial_stop_atr_mult:"2.2", chandelier_atr_mult:"3.0", time_stop_bars:16}},
+  {icon:"🧭", name:"路由 · 全天候", quality:"ok", qtext:"组合", desc:"牛做多 / 熊做空自动切换（回测 +43% · 回撤 13.9%）", mode:"regime_router",
+   params:{bear_stop_atr:"3.0", bear_tp_atr:"4.0"}},
+  {icon:"🔁", name:"震荡 · 实验用", quality:"warn", qtext:"大概率被拒", desc:"历史 4 组参数全负——除非你有新想法，提交它是给门送人头", mode:"chop_mean_reversion",
+   params:{chop_mr_stretch_atr:"2.0", chop_mr_tp_atr:"0.8"}},
 ];
+
 function renderTemplates() {
   const box = document.getElementById('tpls');
   TEMPLATES.forEach((t, i) => {
     const d = document.createElement('div');
     d.className = 'tpl';
-    d.innerHTML = `<b>${t.name}</b><small>${t.desc}</small>`;
+    d.innerHTML = `<div class="t">${t.icon} ${t.name} <span class="tag ${t.quality}">${t.qtext}</span></div>
+      <div class="d">${t.desc}</div><div class="fill">点击填充 →</div>`;
     d.onclick = () => {
-      document.getElementById('name').value = 'tpl_' + i + '_' + Math.random().toString(36).slice(2,6);
-      document.getElementById('author').value = '';
+      document.getElementById('name').value = t.mode.slice(0,4) + '_' + i + '_' + Math.random().toString(36).slice(2,6);
       document.getElementById('mode').value = t.mode;
       document.getElementById('params').value = JSON.stringify(t.params, null, 2);
-      document.getElementById('msg').textContent = '已填充「' + t.name + '」——改个名字（和作者），按需微调参数后提交';
+      toast('已填充「' + t.name + '」— 改个名字提交');
+      document.getElementById('name').focus();
+      document.getElementById('name').select();
     };
     box.appendChild(d);
   });
 }
+
+function toast(text) {
+  const t = document.getElementById('toast');
+  t.textContent = text; t.classList.add('show');
+  clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove('show'), 2600);
+}
+
+function setMsg(text, cls) {
+  const m = document.getElementById('msg');
+  m.textContent = text;
+  m.className = cls ? 'show ' + cls : 'show';
+}
+
 async function refresh() {
   try {
     const r = await fetch('/api/strategies');
     const d = await r.json();
+    const rows = d.strategies || [];
+    const active = rows.filter(s => s.status === 'active');
+    document.getElementById('st-total').textContent = rows.length;
+    document.getElementById('st-active').textContent = active.length;
+    const rets = active.map(s => +s.return_pct || 0);
+    document.getElementById('st-best').textContent = rets.length ? Math.max(...rets).toFixed(2) + '%' : '—';
+    document.getElementById('st-worst').textContent = rets.length ? Math.min(...rets).toFixed(2) + '%' : '—';
     const tb = document.querySelector('#board tbody');
     tb.innerHTML = '';
-    (d.strategies||[]).sort((a,b)=>(b.return_pct??-999)-(a.return_pct??-999)).forEach(s => {
+    document.getElementById('empty').style.display = rows.length ? 'none' : 'block';
+    rows.sort((a,b)=>((+b.return_pct||-999)-(+a.return_pct||-999))).forEach(s => {
+      const ret = s.return_pct !== undefined ? +s.return_pct : null;
+      const retCls = ret === null ? '' : (ret >= 0 ? 'pos' : 'neg');
+      const reasons = Array.isArray(s.reasons) ? s.reasons.join('；') : '';
       const tr = document.createElement('tr');
-      tr.className = s.status||'active';
-      const reasons = Array.isArray(s.reasons)? s.reasons.join('; ') : '';
-      tr.innerHTML = `<td>${s.name}</td><td>${s.author||''}</td><td>${s.mode||''}</td>
-        <td><span class="badge">${s.status||''}</span></td>
-        <td>${fmt(s.equity)}</td><td>${fmt(s.return_pct)}</td><td>${fmt(s.drawdown_pct)}</td>
-        <td>${s.trades??''}</td><td>${fmt(s.win_rate_pct)}</td><td>${fmt(s.profit_factor)}</td>
-        <td>${s.open_positions??''}</td><td style="max-width:280px">${reasons}</td>
-        <td>${s.status==='active'||s.status==='rejected'?`<button class="sec" onclick="del('${s.name}')">下线</button>`:''}</td>`;
+      const barPct = ret === null ? 0 : Math.min(Math.abs(ret) / 40 * 100, 100);
+      tr.innerHTML = `
+        <td class="name-cell">${s.name}<small>${s.author || ''} · ${s.mode || ''}</small></td>
+        <td><span class="pill ${s.status}">${({active:"运行中",rejected:"已拒收",archived:"已下线"})[s.status]||s.status}</span></td>
+        <td style="text-align:right">${fmt(s.equity)}</td>
+        <td style="text-align:right"><span class="${retCls}">${ret === null ? '—' : ret.toFixed(2) + '%'}</span>
+            ${ret !== null ? `<div class="bar"><i style="width:${barPct}%;background:${ret>=0?'var(--green)':'var(--red)'}"></i></div>` : ''}</td>
+        <td style="text-align:right">${fmt(s.drawdown_pct)}</td>
+        <td style="text-align:right">${s.trades ?? '—'}</td>
+        <td style="text-align:right">${fmt(s.win_rate_pct)}</td>
+        <td style="text-align:right">${fmt(s.profit_factor)}</td>
+        <td style="text-align:right">${s.open_positions ?? '—'}</td>
+        <td class="reasons">${reasons}</td>
+        <td>${(s.status==='active'||s.status==='rejected') ? `<button class="icon-btn" onclick="del('${s.name}')">下线</button>` : ''}</td>`;
       tb.appendChild(tr);
     });
-  } catch(e) { console.error(e); }
+  } catch (e) { console.error(e); }
 }
-function fmt(v){ return (v===undefined||v===null)?'':(+v).toFixed(2); }
+
+function fmt(v){ return (v===undefined||v===null||v==='') ? '—' : (+v).toFixed(2); }
+
 function currentSpec() {
   let params = {};
   const raw = document.getElementById('params').value.trim();
@@ -991,43 +1164,47 @@ function currentSpec() {
     params: params
   };
 }
+
 async function submitStrategy() {
-  const msg = document.getElementById('msg');
-  msg.textContent = '验证中（全样本 + 前半样本 + 成本压力回测，约 10~30 秒）...';
+  const btn = document.getElementById('submitBtn');
   try {
     const body = currentSpec();
-    if (!body.name) { msg.textContent = '❌ 请先填策略名'; return; }
-    const r = await fetch('/api/strategies', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+    if (!body.name) { setMsg('❌ 请先填策略名（模板点击后自动生成，可改）', 'err'); return; }
+    btn.disabled = true; btn.innerHTML = '<span class="spin"></span>验证中 10~30s（全样本+前半样本+成本压力）';
+    setMsg('正在跑三重回测验证……', '');
+    const r = await fetch('/api/strategies', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
     const d = await r.json();
-    if (!r.ok) { msg.textContent = '❌ ' + (d.error||JSON.stringify(d)); return; }
-    msg.textContent = (d.pass ? '✅ 通过验证并已开零资金账本: ' : '❌ 被验证门拒收: ') + JSON.stringify(d.reasons)
-      + (d.pass ? '' : '  | 全样本 ' + (+d.full_return_pct).toFixed(1) + '% PF ' + (+d.full_pf).toFixed(2)
-                + ' / 前半 ' + (+d.half_return_pct).toFixed(1) + '%');
+    if (!r.ok) { setMsg('❌ ' + (d.error || JSON.stringify(d)), 'err'); return; }
+    if (d.pass) {
+      setMsg('✅ 通过验证门，零资金账本已开启！全样本 ' + (+d.full_return_pct).toFixed(1) + '% · PF ' + (+d.full_pf).toFixed(2) + ' · 前半 ' + (+d.half_return_pct).toFixed(1) + '%', 'ok');
+      toast('🚀 ' + body.name + ' 已上线');
+    } else {
+      setMsg('❌ 被验证门拒收：' + d.reasons.join('；') + '\n全样本 ' + (+d.full_return_pct).toFixed(1) + '% · PF ' + (+d.full_pf).toFixed(2) + ' · 前半 ' + (+d.half_return_pct).toFixed(1) + '%', 'err');
+    }
     refresh();
-  } catch(e) { msg.textContent = '❌ ' + e; }
+  } catch (e) { setMsg('❌ ' + e, 'err'); }
+  finally { btn.disabled = false; btn.textContent = '🚀 提交并验证'; }
 }
+
 function buildCurl() {
-  return "curl -X POST http://<服务器>:8787/api/strategies -H 'Content-Type: application/json' -d '"
-    + JSON.stringify(currentSpec()) + "'";
+  return "curl -X POST http://<服务器>:8787/api/strategies -H 'Content-Type: application/json' -d '" + JSON.stringify(currentSpec()) + "'";
 }
 function fillCurl() {
   const box = document.getElementById('curlbox');
   box.style.display = 'block';
-  try { box.textContent = buildCurl(); } catch(e) { box.textContent = '参数 JSON 有误: ' + e; }
+  try { box.textContent = buildCurl(); } catch (e) { box.textContent = '参数 JSON 有误: ' + e; }
 }
 function copyCurl() {
   try {
-    const cmd = buildCurl();
-    navigator.clipboard.writeText(cmd).then(
-      () => { document.getElementById('msg').textContent = '📋 curl 命令已复制到剪贴板'; },
-      () => { fillCurl(); }
-    );
-  } catch(e) { fillCurl(); }
+    navigator.clipboard.writeText(buildCurl()).then(() => toast('📋 curl 命令已复制'), fillCurl);
+  } catch (e) { fillCurl(); }
 }
 async function del(name) {
-  await fetch('/api/strategies/'+name, {method:'DELETE'});
+  await fetch('/api/strategies/' + name, { method: 'DELETE' });
+  toast('已下线 ' + name);
   refresh();
 }
+
 renderTemplates();
 refresh();
 setInterval(refresh, 10000);
