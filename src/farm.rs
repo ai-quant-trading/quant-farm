@@ -1150,6 +1150,7 @@ pub async fn serve(farm: Arc<tokio::sync::Mutex<Farm>>, port: u16) -> Result<()>
         .route("/", get(index_page))
         .route("/api/strategies", get(list_strategies).post(submit_strategy))
         .route("/api/strategies/:name", delete(remove_strategy).get(strategy_detail))
+        .route("/api/strategies/:name/promote", post(promote_strategy))
         .with_state(farm);
     let listener = tokio::net::TcpListener::bind(("0.0.0.0", port))
         .await
@@ -1222,6 +1223,87 @@ async fn strategy_detail(
         "validation": reg.and_then(|r| r.validation.clone()),
         "spec": reg.map(|r| r.spec.clone()),
     })))
+}
+
+async fn promote_strategy(
+    State(farm): State<Arc<tokio::sync::Mutex<Farm>>>,
+    axum::extract::Path(name): axum::extract::Path<String>,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    let f = farm.lock().await;
+    let reg = f.registry.iter().find(|r| r.spec.name == name).ok_or((
+        StatusCode::NOT_FOUND,
+        format!("策略 {} 不存在", name),
+    ))?;
+    if reg.status != "active" {
+        return Err((StatusCode::BAD_REQUEST, format!("策略 {} 不是活跃状态，无法转正", name)));
+    }
+    // 转正门槛: 闭环 >= shadow.min_trades_for_promotion 且 PF > 1.1 且 平均R > 0
+    let book = f.books.get(&name).ok_or((
+        StatusCode::NOT_FOUND,
+        format!("策略 {} 没有账本", name),
+    ))?;
+    let st = book.status();
+    let min_trades = f.base_cfg.shadow.min_trades_for_promotion;
+    if st.trades < min_trades || st.profit_factor <= dec!(1.1) {
+        return Err((StatusCode::BAD_REQUEST, format!(
+            "未达转正门槛: 闭环 {}/{} 笔, PF {:.2} (需 ≥{}笔 且 PF>1.1)",
+            st.trades, min_trades, st.profit_factor, min_trades
+        )));
+    }
+    // 写 settings.toml: mode + 参数覆盖
+    let spec = &reg.spec;
+    let cfg_path = "config/settings.toml";
+    let content = std::fs::read_to_string(cfg_path)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("读配置失败: {}", e)))?;
+    let mut new_content = content;
+    // 替换 mode
+    new_content = new_content.replace(
+        &format!("mode = \"{}\"", "regime_router"), // 当前生产模式
+        &format!("mode = \"{}\"", spec.mode),
+    );
+    // 逐参数写入（在 [strategy] 段的 regime_adx_threshold 行后插入）
+    let mut param_lines = String::new();
+    for (k, v) in &spec.params {
+        let val = match v {
+            serde_json::Value::String(s) => format!("\"{}\"", s),
+            serde_json::Value::Number(n) => n.to_string(),
+            serde_json::Value::Bool(b) => b.to_string(),
+            _ => continue,
+        };
+        // 如果文件里已有该键则替换，否则追加到 [strategy] 段末尾
+        if new_content.contains(&format!("{} = ", k)) {
+            new_content = regex_replace_param(&new_content, k, &val);
+        } else {
+            param_lines.push_str(&format!("{} = {}\n", k, val));
+        }
+    }
+    if !param_lines.is_empty() {
+        new_content = new_content.replace("min_atr_percentile", &format!("{}min_atr_percentile", param_lines));
+    }
+    std::fs::write(cfg_path, new_content)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("写配置失败: {}", e)))?;
+    info!("[农场] 策略 {} 已转正为生产策略 (闭环{}笔 PF{:.2}) — 重启 farm-server 生效", name, st.trades, st.profit_factor);
+    Ok(Json(serde_json::json!({
+        "promoted": name,
+        "mode": spec.mode,
+        "trades": st.trades,
+        "pf": st.profit_factor.to_string(),
+        "note": "已写入 config/settings.toml，重启 farm-server 后生效"
+    })))
+}
+
+fn regex_replace_param(content: &str, key: &str, val: &str) -> String {
+    // 简单逐行替换 "key = ..." 为 "key = val"
+    let mut out = Vec::new();
+    for line in content.lines() {
+        let t = line.trim();
+        if t.starts_with(&format!("{} = ", key)) && !t.starts_with(&format!("{} = \"", key)) || t.starts_with(&format!("{} = \"", key)) {
+            out.push(format!("{} = {}", key, val));
+        } else {
+            out.push(line.to_string());
+        }
+    }
+    out.join("\n") + "\n"
 }
 
 async fn index_page() -> Html<&'static str> {
@@ -1572,7 +1654,11 @@ async function refresh() {
         <td style="text-align:right">${s.trades ?? 0} / ${fmt(s.win_rate_pct)}%</td>
         <td style="text-align:right">${fmt(s.profit_factor)}</td>
         <td class="reasons">${reasons}</td>
-        <td>${(s.status==='active'||s.status==='rejected') ? `<button class="icon-btn" onclick="del('${s.name}')">下线</button>` : ''}</td>`;
+        <td style="white-space:nowrap">
+          ${s.status==='active' && (+s.trades||0)>=20 && (+s.profit_factor||0)>1.1
+            ? `<button class="icon-btn" style="color:var(--green);border-color:rgba(52,211,153,.5)" onclick="promote('${s.name}')">🎯 转正</button> ` : ''}
+          ${(s.status==='active'||s.status==='rejected') ? `<button class="icon-btn" onclick="del('${s.name}')">下线</button>` : ''}
+        </td>`;
       tb.appendChild(tr);
     });
   } catch (e) { console.error(e); }
@@ -1691,6 +1777,16 @@ async function submitStrategy() {
 
 function closeDetail() { document.getElementById('modal-bg').classList.remove('show'); }
 document.addEventListener('keydown', e => { if (e.key === 'Escape') closeDetail(); });
+
+async function promote(name) {
+  if (!confirm(`确定将 ${name} 转正为生产策略？\n这将修改 config/settings.toml，重启 farm-server 后生效。`)) return;
+  try {
+    const r = await fetch('/api/strategies/' + encodeURIComponent(name) + '/promote', { method: 'POST' });
+    const d = await r.json();
+    if (!r.ok) { toast('❌ ' + (d.error||d)); return; }
+    toast('🎯 ' + name + ' 已转正！重启 farm-server 后生效');
+  } catch(e) { toast('❌ ' + e); }
+}
 
 async function del(name) {
   await fetch('/api/strategies/' + name, { method: 'DELETE' });
