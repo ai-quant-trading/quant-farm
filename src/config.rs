@@ -204,6 +204,8 @@ pub enum StrategyMode {
     ChopMeanReversion,
     /// 成熟熊市空头 (Bear Short: 熊市确立后顺势/拉升衰竭做空, 非对称屏障, 破位即撤)
     BearShort,
+    /// 按大盘状态自动路由: Bull 走 long_only_breakout, Bear 走 bear_short, Chop 空仓
+    RegimeRouter,
 }
 
 impl Default for StrategyMode {
@@ -222,6 +224,7 @@ impl std::fmt::Display for StrategyMode {
             StrategyMode::EnsembleComposite => write!(f, "EnsembleComposite (多因子融合策略)"),
             StrategyMode::ChopMeanReversion => write!(f, "ChopMeanReversion (震荡区间均值回归)"),
             StrategyMode::BearShort => write!(f, "BearShort (成熟熊市空头)"),
+            StrategyMode::RegimeRouter => write!(f, "RegimeRouter (按大盘状态自动路由)"),
         }
     }
 }

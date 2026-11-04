@@ -20,7 +20,10 @@ slippage_rate = "0.0005"
 default_funding_rate_8h = "0.0001"
 
 [strategy]
-mode = "long_only_breakout"
+# 大盘状态路由：Bull -> 突破多头臂，Bear -> 成熟熊市空头臂，Chop -> 空仓。
+# 依据 reports/regime_router_validation.md：9000h 142.83U/DD 13.88%/Sharpe 1.35，
+# 更早 6000h 111.45U/DD 12.90%（同期 long_only 为 133.80U/17.62% 与 98.68U/17.62%）。
+mode = "regime_router"
 benchmark_symbol = "BTCUSDT"
 universe = [
     "SOLUSDT",

@@ -45,6 +45,27 @@ cargo run --release -- backtest --equity 100 --bars 3000 --report reports/backte
 cargo run --release -- backtest --equity 200 --bars 3000 --report reports/backtest_200u.md
 ```
 
+### 2.1 策略模式与当前冠军：RegimeRouter
+
+`config/settings.toml` 的 `[strategy] mode` 决定用哪套规则，回测时也可用 `--mode` 临时覆盖：
+
+| mode | 说明 |
+| --- | --- |
+| `regime_router` | **当前生产默认**。Bull 走突破多头臂，Bear 走成熟熊市空头臂，Chop 空仓 |
+| `long_only_breakout` | 只做多头突破，Bear/Chop 空仓（原冠军，Router 的双窗口对照组） |
+| `bear_short` | 只做成熟熊市空头（Router 的 Bear 臂单独形态） |
+| `chop_mean_reversion` | 震荡区间均值回归（9000h 回测 -19.83%，未采用） |
+| `all_weather_breakout` / `volatility_squeeze` / `trend_pullback` / `ensemble_composite` | 早期多空/融合模式，横向对比全部落后于 Router |
+
+双窗口验证数据见 [`reports/regime_router_validation.md`](reports/regime_router_validation.md)：
+最近 8791h 净值 142.83U / 回撤 13.88% / Sharpe 1.35，更早 5791h 净值 111.45U / 回撤 12.90%，
+两个窗口都优于 `long_only_breakout` 的 133.80U / 17.62% 与 98.68U / 17.62%。
+
+```bash
+# 指定模式跑回测
+./target/release/coin-ai backtest --bars 9000 --mode regime_router --report reports/backtest_9000_regime_router.md
+```
+
 ### 3. 启动 100U 模拟实盘守护进程（Dry-Run 模式）
 
 连接实时行情进行模拟撮合，持仓与止损状态自动持久化至 `data/live_state.json`：

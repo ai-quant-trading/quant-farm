@@ -162,7 +162,7 @@ impl BacktestEngine {
                     };
 
                     // 根据真实开仓均价调整初始硬止损价（倍数按模式：MR 紧凑止损）
-                    let stop_dist = sig.atr_val * crate::strategy::stop_atr_mult(&self.cfg.strategy);
+                    let stop_dist = sig.atr_val * crate::strategy::stop_atr_mult_for(&self.cfg.strategy, sig.side);
                     let initial_stop = match sig.side {
                         Side::Long => spec.round_price(fill_entry - stop_dist),
                         Side::Short => spec.round_price(fill_entry + stop_dist),
@@ -175,7 +175,7 @@ impl BacktestEngine {
                     }
 
                     // 固定目标价（仅 MR 模式 > 0：均值回归回到均值即离场；其余模式 ZERO 维持纯移动止损）
-                    let tp_mult = crate::strategy::fixed_tp_atr_mult(&self.cfg.strategy);
+                    let tp_mult = crate::strategy::fixed_tp_atr_mult_for(&self.cfg.strategy, sig.side);
                     let take_profit = if tp_mult > Decimal::ZERO {
                         match sig.side {
                             Side::Long => spec.round_price(fill_entry + sig.atr_val * tp_mult),
@@ -187,7 +187,7 @@ impl BacktestEngine {
 
                     // 调用 100U/200U 风控网关“以损定仓”计算器（含模式风险缩放：BearShort 半风险）
                     if let Some(sizing) = risk_mgr.calculate_position_size(
-                        current_eq * crate::strategy::risk_scale_factor(&self.cfg.strategy),
+                        current_eq * crate::strategy::risk_scale_factor_for(&self.cfg.strategy, sig.side),
                         fill_entry,
                         initial_stop,
                         &spec,

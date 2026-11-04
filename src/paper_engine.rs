@@ -397,7 +397,8 @@ impl SqlitePaperEngine {
                         Side::Long => spec.round_price(bar_open * (Decimal::ONE + slip_rate)),
                         Side::Short => spec.round_price(bar_open * (Decimal::ONE - slip_rate)),
                     };
-                    let stop_dist = sig.atr_val * self.cfg.strategy.initial_stop_atr_mult;
+                    let stop_dist = sig.atr_val
+                        * crate::strategy::stop_atr_mult_for(&self.cfg.strategy, sig.side);
                     let initial_stop = match sig.side {
                         Side::Long => spec.round_price(fill_entry - stop_dist),
                         Side::Short => spec.round_price(fill_entry + stop_dist),
@@ -814,9 +815,13 @@ impl SqlitePaperEngine {
         // 必须满足浮盈达到初始风险的 1.2R 以上，且移动止损线保留充足呼吸空间。
         let spec = SymbolSpec::default_for(&p.symbol);
         let init_risk_usd = (p.entry_price - p.initial_stop).abs() * p.qty;
+        let pos_side_for_atr = if p.side == "LONG" { Side::Long } else { Side::Short };
         let cur_atr = atr_opt
             .filter(|a| *a > Decimal::ZERO)
-            .unwrap_or((p.entry_price - p.initial_stop).abs() / dec!(2.2));
+            .unwrap_or(
+                (p.entry_price - p.initial_stop).abs()
+                    / crate::strategy::stop_atr_mult_for(strat, pos_side_for_atr),
+            );
 
         let current_r = if init_risk_usd > Decimal::ZERO {
             upnl / init_risk_usd
@@ -824,13 +829,20 @@ impl SqlitePaperEngine {
             Decimal::ZERO
         };
 
-        let regime_flip_exit = match (p.side.as_str(), regime) {
-            ("LONG", MarketRegime::Bear) => current_r < dec!(0.5),
-            ("SHORT", MarketRegime::Bull) => current_r < dec!(0.5),
-            _ => false,
+        let pos_side = if p.side == "LONG" { Side::Long } else { Side::Short };
+        // 与回测 `update_position_on_bar_close` 完全同源：熊市臂空单在大盘离开 Bear
+        // （含转 Chop）且浮盈不足 0.5R 时撤退；趋势臂空单只在转 Bull 时撤退。
+        let regime_flip_exit = if crate::strategy::is_bear_arm(strat, pos_side) {
+            p.side == "SHORT" && regime != MarketRegime::Bear && current_r < dec!(0.5)
+        } else {
+            match (p.side.as_str(), regime) {
+                ("LONG", MarketRegime::Bear) => current_r < dec!(0.5),
+                ("SHORT", MarketRegime::Bull) => current_r < dec!(0.5),
+                _ => false,
+            }
         };
-        let time_stop_exit =
-            p.bars_held >= strat.time_stop_bars && current_r < strat.time_stop_min_r;
+        let time_stop_exit = p.bars_held >= crate::strategy::time_stop_bars_for(strat, pos_side)
+            && current_r < strat.time_stop_min_r;
 
         if init_risk_usd > Decimal::ZERO && upnl >= init_risk_usd * dec!(1.2) {
             if p.side == "LONG" {
@@ -945,6 +957,11 @@ impl SqlitePaperEngine {
             if open_count >= risk_mgr.risk_cfg.max_concurrent_positions {
                 break;
             }
+            // 已有持仓（含本轮刚决策开出的）绝不重复开仓：symbol 是 positions 表主键，
+            // 漏掉这一步会导致同一币种每 10 秒被重新开一次、反复扣手续费。
+            if dynamic_mock.iter().any(|p| &p.symbol == sym) {
+                continue;
+            }
             let side_str = if *side == Side::Long {
                 "LONG"
             } else {
@@ -980,8 +997,8 @@ impl SqlitePaperEngine {
                 q.bid_price
             };
             // 倍数按模式取值（MR 紧凑止损 + 均值目标价；趋势模式沿用原参数，行为不变）
-            let stop_dist = *cur_atr * crate::strategy::stop_atr_mult(strat);
-            let tp_dist = *cur_atr * crate::strategy::live_tp_atr_mult(strat);
+            let stop_dist = *cur_atr * crate::strategy::stop_atr_mult_for(strat, *side);
+            let tp_dist = *cur_atr * crate::strategy::live_tp_atr_mult_for(strat, *side);
 
             let (init_stop, take_profit) = if side_str == "LONG" {
                 (
@@ -997,7 +1014,7 @@ impl SqlitePaperEngine {
 
             if let Some(sizing) = risk_mgr.calculate_position_size(
                 // 模式风险缩放：BearShort 未验证期半风险（书的新模块审慎原则）
-                cur_equity * crate::strategy::risk_scale_factor(strat),
+                cur_equity * crate::strategy::risk_scale_factor_for(strat, *side),
                 fill_entry,
                 init_stop,
                 &spec,
@@ -1088,6 +1105,8 @@ impl SqlitePaperEngine {
         let mut rolling_baseline_prices: HashMap<String, Decimal> = HashMap::new();
         // 下单前波动闸门的价格历史环形缓冲：每周期记录 (ts, last_price)，仅保留最近 120 秒
         let mut price_history: HashMap<String, Vec<(i64, Decimal)>> = HashMap::new();
+        // 与回测同源：记录每个币种最近一次开仓所依据的小时 K 线，同一根 K 线只开一次。
+        let mut last_entry_bar: HashMap<String, i64> = HashMap::new();
         // BearShort 影子模式（零资金、独立账本、只记账不下单，积累 live OOS 证据）
         let mut shadow = if self.cfg.shadow.enabled {
             match crate::shadow::ShadowEngine::new(&self.cfg) {
@@ -1326,7 +1345,7 @@ impl SqlitePaperEngine {
                     CircuitBreakerState::Halted | CircuitBreakerState::DailyCooldown { .. }
                 )
             {
-                let entries: Vec<(String, Side, Decimal)>;
+                let mut entries: Vec<(String, Side, Decimal)>;
 
                 if let Some((ref sev, ref src, btc_d, bnb_d, sp, br, ref target_sym)) =
                     black_swan_alert
@@ -1401,6 +1420,16 @@ impl SqlitePaperEngine {
                         })
                         .collect();
                 }
+
+                // 同一根小时 K 线只允许开一次仓：否则持仓被打掉后，未收盘的静态信号
+                // 会在 1800s 冷却结束后反复重开同一单，与回测口径（每根 K 线最多一次）不符。
+                let scan_bar_ts = btc_candles.last().map(|c| c.timestamp).unwrap_or(0);
+                entries.retain(|(sym, _, _)| {
+                    last_entry_bar
+                        .get(sym)
+                        .map(|t| *t != scan_bar_ts)
+                        .unwrap_or(true)
+                });
 
                 // 开仓门控走与回放压测引擎共用的纯函数 `check_new_entries`（同源保证）：
                 // 30 分钟防刷单冷却 / 盘口点差 > 3.5bps 拒单 / 波动闸门 / 持仓上限 / 以损定仓 全部在内
@@ -1512,6 +1541,7 @@ impl SqlitePaperEngine {
                     };
                     db.upsert_position(&new_pos)?;
                     surviving_positions.push(new_pos);
+                    last_entry_bar.insert(d.symbol.clone(), scan_bar_ts);
 
                     info!(
                         "[API 实时下单落库] {} {} | 订单号: {} | 盘口成交价: {} (Bid={} / Ask={}) | 数量: {} ({:.2}U) | 硬止损单: {} (@ {})",

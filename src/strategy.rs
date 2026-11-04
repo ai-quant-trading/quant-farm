@@ -134,6 +134,58 @@ pub fn risk_scale_factor(cfg: &StrategyConfig) -> Decimal {
     }
 }
 
+/// 该持仓是否走「成熟熊市空头」参数组。
+/// `RegimeRouter` 模式下短单自动归入熊市臂，长单归入趋势臂。
+pub fn is_bear_arm(cfg: &StrategyConfig, side: Side) -> bool {
+    match cfg.mode {
+        StrategyMode::BearShort => true,
+        StrategyMode::RegimeRouter => side == Side::Short,
+        _ => false,
+    }
+}
+
+pub fn stop_atr_mult_for(cfg: &StrategyConfig, side: Side) -> Decimal {
+    if is_bear_arm(cfg, side) {
+        cfg.bear_stop_atr
+    } else {
+        stop_atr_mult(cfg)
+    }
+}
+
+pub fn fixed_tp_atr_mult_for(cfg: &StrategyConfig, side: Side) -> Decimal {
+    if is_bear_arm(cfg, side) {
+        cfg.bear_tp_atr
+    } else {
+        fixed_tp_atr_mult(cfg)
+    }
+}
+
+pub fn live_tp_atr_mult_for(cfg: &StrategyConfig, side: Side) -> Decimal {
+    if is_bear_arm(cfg, side) {
+        cfg.bear_tp_atr
+    } else {
+        live_tp_atr_mult(cfg)
+    }
+}
+
+pub fn risk_scale_factor_for(cfg: &StrategyConfig, side: Side) -> Decimal {
+    if is_bear_arm(cfg, side) {
+        dec!(0.5)
+    } else {
+        risk_scale_factor(cfg)
+    }
+}
+
+pub fn time_stop_bars_for(cfg: &StrategyConfig, side: Side) -> usize {
+    if is_bear_arm(cfg, side) {
+        cfg.bear_time_stop_bars
+    } else if cfg.mode == StrategyMode::ChopMeanReversion {
+        cfg.chop_mr_time_stop_bars
+    } else {
+        cfg.time_stop_bars
+    }
+}
+
 /// Chop 均值回归扫描：区间边缘 + 均值拉伸 + 缩量（放量=突破能量，MR 不接飞刀）。
 /// 与趋势扫描完全独立：不用截面动量排名、不用乖离闸门（拉伸本身就是入场理由）。
 fn scan_chop_mr_signals(
@@ -437,6 +489,24 @@ pub fn scan_entry_signals(
     btc_candles: &[Candle],
     cfg: &StrategyConfig,
 ) -> Vec<SignalCandidate> {
+    // 大盘状态路由模式：Bull 用已验证的突破多头臂，Bear 用已验证的成熟熊市空头臂，Chop 空仓。
+    // 两条臂各自独立回测过，组合只共享账户与风控，不共享参数。
+    if cfg.mode == StrategyMode::RegimeRouter {
+        return match regime {
+            MarketRegime::Bull => scan_entry_signals(
+                MarketRegime::Bull,
+                universe_candles,
+                btc_candles,
+                &StrategyConfig {
+                    mode: StrategyMode::LongOnlyBreakout,
+                    ..cfg.clone()
+                },
+            ),
+            MarketRegime::Bear => scan_bear_short_signals(universe_candles, btc_candles, cfg),
+            MarketRegime::Chop => Vec::new(),
+        };
+    }
+
     // 震荡均值回归模式：Chop 状态下走独立的区间边缘扫描（不穿越趋势排名/乖离闸门）
     if cfg.mode == StrategyMode::ChopMeanReversion {
         if regime == MarketRegime::Chop {
@@ -573,6 +643,8 @@ pub fn scan_entry_signals(
                     StrategyMode::ChopMeanReversion => false,
                     // BearShort 模式在函数入口已分流到 scan_bear_short_signals，趋势臂不可达
                     StrategyMode::BearShort => false,
+                    // RegimeRouter 在函数入口已按大盘状态分流，不会走到趋势臂的 mode 判断
+                    StrategyMode::RegimeRouter => false,
                 };
 
                 if triggered {
@@ -662,7 +734,7 @@ pub fn update_position_on_bar_close(
         if regime != MarketRegime::Chop {
             return Some(ExitReason::RegimeFlip);
         }
-    } else if cfg.mode == StrategyMode::BearShort {
+    } else if is_bear_arm(cfg, pos.side) {
         // 空头仓位属于熊市：大盘离开 Bear（含转 Chop——验尸报告确认 Bear→Chop 不解救是旧臂死因之一）
         // 且浮盈不足 0.5R 时立即撤退，不吃熊市反弹的逆势回撤
         if pos.side == Side::Short && regime != MarketRegime::Bear && current_r < dec!(0.5) {
@@ -675,11 +747,7 @@ pub fn update_position_on_bar_close(
     }
 
     // 3. 时间止损（MR/BearShort 用各自更短的专用窗口：不成立就走）
-    let time_stop_bars = match cfg.mode {
-        StrategyMode::ChopMeanReversion => cfg.chop_mr_time_stop_bars,
-        StrategyMode::BearShort => cfg.bear_time_stop_bars,
-        _ => cfg.time_stop_bars,
-    };
+    let time_stop_bars = time_stop_bars_for(cfg, pos.side);
     if pos.bars_held >= time_stop_bars && current_r < cfg.time_stop_min_r {
         return Some(ExitReason::TimeStop);
     }
