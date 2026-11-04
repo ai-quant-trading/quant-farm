@@ -210,6 +210,18 @@ pub enum StrategyMode {
     EmaCross,
     /// NFI 精神深回调买（上升趋势 + 价格深度跌离均线 + 阳线企稳才接, 多层保护）
     DipBuy,
+    /// SuperTrend ATR 趋势跟踪（开源流行指标策略）
+    SuperTrend,
+    /// MACD 金叉死叉（经典动量）
+    MacdCross,
+    /// 布林带回归（下轨买/上轨卖, freqtrade Strategy004 同族）
+    BbReversion,
+    /// 一目均衡表云图（价格在云上+转换线金叉）
+    Ichimoku,
+    /// 网格阶梯（价格跌离均线 N% 接, 简化信号版）
+    GridStep,
+    /// 组合模式：多子策略按权重分仓并行
+    Combo,
 }
 
 impl Default for StrategyMode {
@@ -230,6 +242,12 @@ impl std::fmt::Display for StrategyMode {
             StrategyMode::BearShort => write!(f, "BearShort (成熟熊市空头)"),
             StrategyMode::EmaCross => write!(f, "EmaCross (EMA双均线交叉)"),
             StrategyMode::DipBuy => write!(f, "DipBuy (趋势深回调买)"),
+            StrategyMode::SuperTrend => write!(f, "SuperTrend (ATR趋势跟踪)"),
+            StrategyMode::MacdCross => write!(f, "MacdCross (MACD金叉死叉)"),
+            StrategyMode::BbReversion => write!(f, "BbReversion (布林带回归)"),
+            StrategyMode::Ichimoku => write!(f, "Ichimoku (一目均衡云图)"),
+            StrategyMode::GridStep => write!(f, "GridStep (网格阶梯)"),
+            StrategyMode::Combo => write!(f, "Combo (多策略组合)"),
             StrategyMode::RegimeRouter => write!(f, "RegimeRouter (按大盘状态自动路由)"),
         }
     }
@@ -326,7 +344,58 @@ pub struct StrategyConfig {
     /// 回调深度阈值（价格低于 EMA20 的 ATR 倍数），默认 1.5
     #[serde(default = "default_dip_depth")]
     pub dip_depth_atr: Decimal,
+    // ---- SuperTrend ----
+    #[serde(default = "default_st_period")]
+    pub st_atr_period: usize,
+    #[serde(default = "default_st_mult")]
+    pub st_multiplier: Decimal,
+    #[serde(default = "default_st_short")]
+    pub st_allow_short: bool,
+    // ---- MACD ----
+    #[serde(default = "default_macd_fast")]
+    pub macd_fast: usize,
+    #[serde(default = "default_macd_slow")]
+    pub macd_slow: usize,
+    #[serde(default = "default_macd_signal")]
+    pub macd_signal: usize,
+    #[serde(default = "default_macd_short")]
+    pub macd_allow_short: bool,
+    // ---- 布林带 ----
+    #[serde(default = "default_bb_period")]
+    pub bb_period: usize,
+    #[serde(default = "default_bb_std")]
+    pub bb_std: Decimal,
+    #[serde(default = "default_bb_short")]
+    pub bb_allow_short: bool,
+    // ---- 一目均衡 ----
+    #[serde(default = "default_ichi_tenkan")]
+    pub ichi_tenkan: usize,
+    #[serde(default = "default_ichi_kijun")]
+    pub ichi_kijun: usize,
+    #[serde(default = "default_ichi_spanb")]
+    pub ichi_spanb: usize,
+    #[serde(default = "default_ichi_short")]
+    pub ichi_allow_short: bool,
+    // ---- 网格阶梯 ----
+    #[serde(default = "default_grid_step")]
+    pub grid_step_pct: Decimal,
 }
+
+fn default_st_period() -> usize { 10 }
+fn default_st_mult() -> Decimal { dec!(3.0) }
+fn default_st_short() -> bool { true }
+fn default_macd_fast() -> usize { 12 }
+fn default_macd_slow() -> usize { 26 }
+fn default_macd_signal() -> usize { 9 }
+fn default_macd_short() -> bool { true }
+fn default_bb_period() -> usize { 20 }
+fn default_bb_std() -> Decimal { dec!(2.0) }
+fn default_bb_short() -> bool { true }
+fn default_ichi_tenkan() -> usize { 9 }
+fn default_ichi_kijun() -> usize { 26 }
+fn default_ichi_spanb() -> usize { 52 }
+fn default_ichi_short() -> bool { true }
+fn default_grid_step() -> Decimal { dec!(0.03) }
 
 fn default_ema_fast() -> usize { 20 }
 fn default_ema_slow() -> usize { 60 }

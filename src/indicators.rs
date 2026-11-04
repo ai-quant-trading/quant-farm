@@ -21,6 +21,23 @@ pub fn ema(values: &[Decimal], period: usize) -> Option<Decimal> {
 }
 
 /// 计算平均真实波幅 (ATR)
+/// 增量 EMA 序列（index i 处 = 截至第 i 个值的 EMA），前 period-1 个为 None
+pub fn ema_series(values: &[Decimal], period: usize) -> Vec<Option<Decimal>> {
+    let n = values.len();
+    let mut out = vec![None; n];
+    if period == 0 || n < period {
+        return out;
+    }
+    let k = dec!(2) / Decimal::from(period + 1);
+    let mut e = values[..period].iter().copied().sum::<Decimal>() / Decimal::from(period);
+    out[period - 1] = Some(e);
+    for i in period..n {
+        e = values[i] * k + e * (Decimal::ONE - k);
+        out[i] = Some(e);
+    }
+    out
+}
+
 pub fn atr(candles: &[Candle], period: usize) -> Option<Decimal> {
     if candles.len() < period + 1 || period == 0 {
         return None;

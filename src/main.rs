@@ -340,6 +340,11 @@ async fn main() -> Result<()> {
                     "bear_short" => StrategyMode::BearShort,
                     "ema_cross" => StrategyMode::EmaCross,
                     "dip_buy" => StrategyMode::DipBuy,
+                    "supertrend" => StrategyMode::SuperTrend,
+                    "macd_cross" => StrategyMode::MacdCross,
+                    "bb_reversion" => StrategyMode::BbReversion,
+                    "ichimoku" => StrategyMode::Ichimoku,
+                    "grid_step" => StrategyMode::GridStep,
                     "regime_router" => StrategyMode::RegimeRouter,
                     other => anyhow::bail!(
                         "未知策略模式: {} (可选: long_only_breakout / all_weather_breakout / volatility_squeeze / trend_pullback / ensemble_composite / chop_mean_reversion / bear_short)",

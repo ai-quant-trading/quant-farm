@@ -32,6 +32,7 @@ fn test_spec_allowlist_accepts_valid_params() {
         })),
         universe: Some(vec!["SOLUSDT".to_string(), "ETHUSDT".to_string()]),
         initial_equity: dec!(100),
+        combo: None,
     };
     let out = spec_to_config(&cfg, &spec).expect("合法 spec 应通过");
     assert_eq!(out.strategy.bear_stop_atr, dec!(2.5));
@@ -49,6 +50,7 @@ fn test_spec_rejects_unknown_param_and_bad_universe() {
         params: jmap(json!({ "risk_per_trade_pct": "0.5" })),
         universe: None,
         initial_equity: dec!(100),
+        combo: None,
     };
     // 风控参数不在白名单 → 拒（所有账本共享生产风控纪律）
     assert!(spec_to_config(&cfg, &spec).is_err());

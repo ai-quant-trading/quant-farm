@@ -39,6 +39,20 @@ pub struct Book {
     risk_mgr: RiskManager,
     pub pending_entries: Vec<(String, Side, Decimal)>,
     seq: usize,
+    /// 组合子策略（(子cfg, 权重)），None = 单策略书
+    pub subs: Option<Vec<(AppConfig, Decimal)>>,
+    /// 组合书的待开信号（子序号, 真实symbol, 方向, ATR）
+    pending_combo: Vec<(usize, String, Side, Decimal)>,
+}
+
+/// 剥离组合前缀 "C{i}:SYM" → (子序号, 真实symbol)
+fn split_sub_symbol(s: &str) -> (usize, String) {
+    match s.split_once(':') {
+        Some((idx, sym)) if idx.starts_with('C') => {
+            (idx[1..].parse().unwrap_or(0), sym.to_string())
+        }
+        _ => (0, s.to_string()),
+    }
 }
 
 impl Book {
@@ -56,7 +70,28 @@ impl Book {
             risk_mgr,
             pending_entries: Vec::new(),
             seq: 0,
+            subs: None,
+            pending_combo: Vec::new(),
         })
+    }
+
+    /// 组合书：多个子策略共享账本与风控，按权重分仓
+    pub fn new_combo(
+        name: &str,
+        base_cfg: AppConfig,
+        subs: Vec<(AppConfig, Decimal)>,
+        db_path: &str,
+    ) -> Result<Self> {
+        // 权重归一化
+        let total: Decimal = subs.iter().map(|(_, w)| w).sum();
+        let total = if total > Decimal::ZERO { total } else { Decimal::ONE };
+        let subs: Vec<(AppConfig, Decimal)> = subs
+            .into_iter()
+            .map(|(c, w)| (c, w / total))
+            .collect();
+        let mut book = Book::new(name, base_cfg, db_path)?;
+        book.subs = Some(subs);
+        Ok(book)
     }
 
     /// 整点指标刷新后：按本 Book 的模式重算候选信号
@@ -77,12 +112,34 @@ impl Book {
                 (k.clone(), &v[start..])
             })
             .collect();
+        if let Some(subs) = &self.subs {
+            self.pending_combo.clear();
+            for (i, (sub_cfg, _w)) in subs.iter().enumerate() {
+                let signals =
+                    scan_entry_signals(regime, &slices, btc_candles, &sub_cfg.strategy);
+                for s in signals {
+                    self.pending_combo.push((i, s.symbol, s.side, s.atr_val));
+                }
+            }
+            self.pending_combo.sort_by(|a, b| b.3.cmp(&a.3));
+        }
         let signals = scan_entry_signals(regime, &slices, btc_candles, &self.cfg.strategy);
         self.pending_entries = signals
             .into_iter()
             .map(|s| (s.symbol, s.side, s.atr_val))
             .collect();
-        if !self.pending_entries.is_empty() {
+        if !self.pending_combo.is_empty() {
+            info!(
+                "[农场:{}] 组合候选 {} 个: {:?}",
+                self.name,
+                self.pending_combo.len(),
+                self.pending_combo
+                    .iter()
+                    .map(|(i, s, _, _)| format!("C{}:{}", i, s))
+                    .collect::<Vec<_>>()
+            );
+        }
+        if self.subs.is_none() && !self.pending_entries.is_empty() {
             info!(
                 "[农场:{}] 候选信号 {} 个: {:?}",
                 self.name,
@@ -112,14 +169,21 @@ impl Book {
         let mut total_upnl = Decimal::ZERO;
         let mut surviving: Vec<DbPositionRow> = Vec::new();
         for p in positions.drain(..) {
-            let q = match quotes.get(&p.symbol) {
+            // 组合书: 剥前缀拿真实 symbol 的盘口/ATR 与子策略参数
+            let (sub_idx, real_sym) = split_sub_symbol(&p.symbol);
+            let sub_cfg: &AppConfig = self
+                .subs
+                .as_ref()
+                .and_then(|s| s.get(sub_idx).map(|(c, _)| c))
+                .unwrap_or(&self.cfg);
+            let q = match quotes.get(&real_sym) {
                 Some(q) => q,
                 None => {
                     surviving.push(p);
                     continue;
                 }
             };
-            let atr_opt = coin_metrics.get(&p.symbol).map(|&(_, a, _)| a);
+            let atr_opt = coin_metrics.get(&real_sym).map(|&(_, a, _)| a);
             match SqlitePaperEngine::check_position_exit(
                 p,
                 q,
@@ -127,7 +191,7 @@ impl Book {
                 atr_opt,
                 false,
                 now_ms,
-                &self.cfg.strategy,
+                &sub_cfg.strategy,
             ) {
                 LiveExitDecision::Hold(mut p2) => {
                     total_upnl += p2.unrealized_pnl;
@@ -213,8 +277,87 @@ impl Book {
             }
         }
 
+        // ---- 组合开仓: 每个子策略用 (净值×权重) 的资金预算独立过完整门控 ----
+        if !self.pending_combo.is_empty() {
+            let subs = match &self.subs {
+                Some(s) => s.clone(),
+                None => Vec::new(),
+            };
+            let equity = acct.cash_balance + total_upnl;
+            let mut by_sub: HashMap<usize, Vec<(String, Side, Decimal)>> = HashMap::new();
+            for (i, sym, side, atr) in self.pending_combo.drain(..) {
+                by_sub.entry(i).or_default().push((sym, side, atr));
+            }
+            for (i, entries) in by_sub {
+                let (sub_cfg, w) = match subs.get(i) {
+                    Some(x) => x.clone(),
+                    None => continue,
+                };
+                let mut surviving_this: Vec<DbPositionRow> = surviving
+                    .iter()
+                    .filter(|p| split_sub_symbol(&p.symbol).0 == i)
+                    .cloned()
+                    .collect();
+                let sub_equity = equity * w;
+                let decisions = SqlitePaperEngine::check_new_entries(
+                    &entries,
+                    quotes,
+                    &surviving_this,
+                    sub_equity,
+                    &self.risk_mgr,
+                    &sub_cfg.strategy,
+                    |sym| {
+                        let real = split_sub_symbol(sym).1;
+                        let prefixed = format!("C{}:{}", i, real);
+                        self.db
+                            .is_symbol_in_cooldown(&prefixed, 1800)
+                            .unwrap_or(false)
+                    },
+                    &HashMap::new(),
+                );
+                for d in decisions {
+                    let notional = d.approved_qty * d.fill_entry;
+                    let entry_fee = notional * fee_rate;
+                    acct.cash_balance -= entry_fee;
+                    acct.total_fees_paid += entry_fee;
+                    self.seq += 1;
+                    let prefixed = format!("C{}:{}", i, d.symbol);
+                    let entry_oid = format!("FARM_OPEN_{}_{}_{}", self.name, prefixed, self.seq);
+                    let stop_oid = format!("FARM_STOP_{}_{}_{}", self.name, prefixed, self.seq);
+                    let side_str = if d.side == Side::Long { "LONG" } else { "SHORT" };
+                    let pos = DbPositionRow {
+                        symbol: prefixed.clone(),
+                        side: side_str.to_string(),
+                        qty: d.approved_qty,
+                        entry_price: d.fill_entry,
+                        entry_order_id: entry_oid.clone(),
+                        stop_order_id: stop_oid.clone(),
+                        initial_stop: d.initial_stop,
+                        active_stop: d.initial_stop,
+                        take_profit: d.take_profit,
+                        highest_mark: d.fill_entry,
+                        lowest_mark: d.fill_entry,
+                        last_mark_price: d.fill_entry,
+                        unrealized_pnl: Decimal::ZERO,
+                        entry_fee,
+                        bars_held: 0,
+                        opened_at: now_str.clone(),
+                        updated_at: now_str.clone(),
+                    };
+                    self.db.upsert_position(&pos)?;
+                    surviving_this.push(pos);
+                    info!(
+                        "[农场:{}] C{} 开仓 {} {} @ {} (名义 {:.2}U)",
+                        self.name, i, d.symbol, side_str, d.fill_entry, notional
+                    );
+                }
+                surviving.retain(|p| split_sub_symbol(&p.symbol).0 != i);
+                surviving.extend(surviving_this);
+            }
+        }
+
         // ---- 开仓（完整门控：冷却/点差/以损定仓/模式化风险缩放）----
-        if !self.pending_entries.is_empty()
+        if self.subs.is_none() && !self.pending_entries.is_empty()
             && !matches!(
                 self.risk_mgr.state,
                 crate::risk::CircuitBreakerState::Halted
@@ -451,6 +594,19 @@ pub struct StrategySpec {
     /// 账本虚拟本金（默认 100）
     #[serde(default = "default_spec_equity")]
     pub initial_equity: Decimal,
+    /// 组合子策略（mode="combo" 时必填）：各子策略独立扫描/分仓，共享账本与风控
+    #[serde(default)]
+    pub combo: Option<Vec<ComboSub>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ComboSub {
+    pub mode: String,
+    #[serde(default)]
+    pub params: HashMap<String, serde_json::Value>,
+    /// 资金权重（默认均分）
+    #[serde(default)]
+    pub weight: Option<Decimal>,
 }
 
 fn default_spec_equity() -> Decimal {
@@ -468,12 +624,25 @@ pub const PARAM_ALLOWLIST: &[&str] = &[
     "bear_entry_variant", "bear_max_atr_percentile",
     "ema_fast_period", "ema_slow_period", "ema_cross_allow_short",
     "dip_trend_ema", "dip_depth_atr",
+    "st_atr_period", "st_multiplier", "st_allow_short",
+    "macd_fast", "macd_slow", "macd_signal", "macd_allow_short",
+    "bb_period", "bb_std", "bb_allow_short",
+    "ichi_tenkan", "ichi_kijun", "ichi_spanb", "ichi_allow_short",
+    "grid_step_pct",
 ];
 
 fn json_to_decimal(v: &serde_json::Value) -> Option<Decimal> {
     match v {
         serde_json::Value::Number(n) => Decimal::from_str(&n.to_string()).ok(),
         serde_json::Value::String(s) => Decimal::from_str(s).ok(),
+        _ => None,
+    }
+}
+
+fn json_to_bool(v: &serde_json::Value) -> Option<bool> {
+    match v {
+        serde_json::Value::Bool(b) => Some(*b),
+        serde_json::Value::String(s) if s == "true" || s == "false" => Some(s == "true"),
         _ => None,
     }
 }
@@ -502,11 +671,41 @@ pub fn spec_to_config(base: &AppConfig, spec: &StrategySpec) -> Result<AppConfig
         "regime_router" => StrategyMode::RegimeRouter,
         "ema_cross" => StrategyMode::EmaCross,
         "dip_buy" => StrategyMode::DipBuy,
+        "supertrend" => StrategyMode::SuperTrend,
+        "macd_cross" => StrategyMode::MacdCross,
+        "bb_reversion" => StrategyMode::BbReversion,
+        "ichimoku" => StrategyMode::Ichimoku,
+        "grid_step" => StrategyMode::GridStep,
+        "combo" => StrategyMode::Combo,
         other => bail!(
-            "未知模式: {} (可选: long_only_breakout / bear_short / chop_mean_reversion / regime_router / ema_cross / dip_buy)",
+            "未知模式: {} (可选: long_only_breakout / bear_short / chop_mean_reversion / regime_router / ema_cross / dip_buy / supertrend / macd_cross / bb_reversion / ichimoku / grid_step / combo)",
             other
         ),
     };
+    if spec.mode == "combo" {
+        let subs = spec.combo.as_ref().ok_or_else(|| {
+            anyhow::anyhow!("combo 模式必须提供 combo 数组（2~4 个子策略）")
+        })?;
+        if !(2..=4).contains(&subs.len()) {
+            bail!("组合子策略数量须在 2~4 之间，当前 {}", subs.len());
+        }
+        // 每个子策略单独解析校验（递归，禁止嵌套 combo）
+        for s in subs {
+            let sub_spec = StrategySpec {
+                name: format!("{}_sub", spec.name),
+                author: spec.author.clone(),
+                mode: s.mode.clone(),
+                params: s.params.clone(),
+                universe: spec.universe.clone(),
+                initial_equity: spec.initial_equity,
+                combo: None,
+            };
+            if s.mode == "combo" {
+                bail!("组合不允许嵌套组合");
+            }
+            spec_to_config(base, &sub_spec)?;
+        }
+    }
     if let Some(u) = &spec.universe {
         if u.is_empty() {
             bail!("选币池不能为空");
@@ -537,14 +736,24 @@ pub fn spec_to_config(base: &AppConfig, spec: &StrategySpec) -> Result<AppConfig
             "chop_mr_time_stop_bars" => s.chop_mr_time_stop_bars = json_to_usize(v).ok_or_else(bad)?,
             "bear_maturity_bars" => s.bear_maturity_bars = json_to_usize(v).ok_or_else(bad)?,
             "bear_time_stop_bars" => s.bear_time_stop_bars = json_to_usize(v).ok_or_else(bad)?,
+            "st_atr_period" => s.st_atr_period = json_to_usize(v).ok_or_else(bad)?,
+            "macd_fast" => s.macd_fast = json_to_usize(v).ok_or_else(bad)?,
+            "macd_slow" => s.macd_slow = json_to_usize(v).ok_or_else(bad)?,
+            "macd_signal" => s.macd_signal = json_to_usize(v).ok_or_else(bad)?,
+            "bb_period" => s.bb_period = json_to_usize(v).ok_or_else(bad)?,
+            "ichi_tenkan" => s.ichi_tenkan = json_to_usize(v).ok_or_else(bad)?,
+            "ichi_kijun" => s.ichi_kijun = json_to_usize(v).ok_or_else(bad)?,
+            "ichi_spanb" => s.ichi_spanb = json_to_usize(v).ok_or_else(bad)?,
             "ema_fast_period" => s.ema_fast_period = json_to_usize(v).ok_or_else(bad)?,
             "ema_slow_period" => s.ema_slow_period = json_to_usize(v).ok_or_else(bad)?,
             "dip_trend_ema" => s.dip_trend_ema = json_to_usize(v).ok_or_else(bad)?,
-            "ema_cross_allow_short" => match v {
-                serde_json::Value::Bool(b) => s.ema_cross_allow_short = *b,
-                serde_json::Value::String(x) if x == "true" || x == "false" => s.ema_cross_allow_short = x == "true",
-                _ => return Err(bad()),
-            },
+            "ema_slow_period" => s.ema_slow_period = json_to_usize(v).ok_or_else(bad)?,
+            "dip_trend_ema" => s.dip_trend_ema = json_to_usize(v).ok_or_else(bad)?,
+            "ema_cross_allow_short" => s.ema_cross_allow_short = json_to_bool(v).ok_or_else(bad)?,
+            "st_allow_short" => s.st_allow_short = json_to_bool(v).ok_or_else(bad)?,
+            "macd_allow_short" => s.macd_allow_short = json_to_bool(v).ok_or_else(bad)?,
+            "bb_allow_short" => s.bb_allow_short = json_to_bool(v).ok_or_else(bad)?,
+            "ichi_allow_short" => s.ichi_allow_short = json_to_bool(v).ok_or_else(bad)?,
             "bear_entry_variant" => match v.as_str() {
                 Some(x @ ("breakdown" | "rejection" | "both")) => s.bear_entry_variant = x.to_string(),
                 _ => return Err(bad()),
@@ -571,6 +780,9 @@ pub fn spec_to_config(base: &AppConfig, spec: &StrategySpec) -> Result<AppConfig
                     "bear_tp_atr" => s.bear_tp_atr = d,
                     "bear_max_atr_percentile" => s.bear_max_atr_percentile = d,
                     "dip_depth_atr" => s.dip_depth_atr = d,
+                    "st_multiplier" => s.st_multiplier = d,
+                    "bb_std" => s.bb_std = d,
+                    "grid_step_pct" => s.grid_step_pct = d,
                     _ => unreachable!(),
                 }
             }
@@ -761,10 +973,56 @@ impl Farm {
         }
         // 先做静态解析（快速失败），再跑验证（~10-30s）
         spec_to_config(&self.base_cfg, &spec)?;
-        let report = validate_spec(&self.base_cfg, &spec, &self.data_mgr, 9000).await?;
+        // 组合策略：逐子策略独立过验证门，全部通过才算过
+        let report = if spec.mode == "combo" {
+            let subs = spec.combo.clone().unwrap_or_default();
+            let mut all_pass = true;
+            let mut reasons = Vec::new();
+            let mut agg = ValidationReport {
+                spec_name: spec.name.clone(),
+                pass: true,
+                reasons: vec![],
+                full_return_pct: Decimal::ZERO,
+                full_pf: Decimal::ZERO,
+                full_trades: 0,
+                half_return_pct: Decimal::ZERO,
+                half_pf: Decimal::ZERO,
+                cost15_equity: spec.initial_equity,
+                validated_at: Utc::now().to_rfc3339(),
+            };
+            for (i, s) in subs.iter().enumerate() {
+                let sub_spec = StrategySpec {
+                    name: format!("{}_sub{}", spec.name, i),
+                    author: spec.author.clone(),
+                    mode: s.mode.clone(),
+                    params: s.params.clone(),
+                    universe: spec.universe.clone(),
+                    initial_equity: spec.initial_equity,
+                    combo: None,
+                };
+                let r = validate_spec(&self.base_cfg, &sub_spec, &self.data_mgr, 9000).await?;
+                reasons.push(format!(
+                    "子{}[{}]: {} ({:+.1}%/PF{:.2})",
+                    i, s.mode, if r.pass { "通过" } else { "未过" }, r.full_return_pct, r.full_pf
+                ));
+                if !r.pass {
+                    all_pass = false;
+                }
+                agg.full_return_pct += r.full_return_pct;
+                agg.full_trades += r.full_trades;
+            }
+            agg.pass = all_pass;
+            agg.reasons = if all_pass {
+                vec!["组合全部子策略通过验证门".to_string()]
+            } else {
+                reasons
+            };
+            agg
+        } else {
+            validate_spec(&self.base_cfg, &spec, &self.data_mgr, 9000).await?
+        };
         let status = if report.pass { "active" } else { "rejected" };
         if report.pass {
-            let cfg = spec_to_config(&self.base_cfg, &spec)?;
             let db = self
                 .dir
                 .join("books")
@@ -772,8 +1030,29 @@ impl Farm {
                 .to_str()
                 .unwrap_or_default()
                 .to_string();
-            let book = Book::new(&spec.name, cfg, &db)?;
-            self.books.insert(spec.name.clone(), book);
+            if spec.mode == "combo" {
+                let subs_spec = spec.combo.clone().unwrap_or_default();
+                let mut subs = Vec::new();
+                for s in &subs_spec {
+                    let sub_spec = StrategySpec {
+                        name: format!("{}_sub", spec.name),
+                        author: spec.author.clone(),
+                        mode: s.mode.clone(),
+                        params: s.params.clone(),
+                        universe: spec.universe.clone(),
+                        initial_equity: spec.initial_equity,
+                        combo: None,
+                    };
+                    let cfg = spec_to_config(&self.base_cfg, &sub_spec)?;
+                    subs.push((cfg, s.weight.unwrap_or(Decimal::ONE)));
+                }
+                let book = Book::new_combo(&spec.name, self.base_cfg.clone(), subs, &db)?;
+                self.books.insert(spec.name.clone(), book);
+            } else {
+                let cfg = spec_to_config(&self.base_cfg, &spec)?;
+                let book = Book::new(&spec.name, cfg, &db)?;
+                self.books.insert(spec.name.clone(), book);
+            }
         }
         self.registry.push(RegisteredSpec {
             spec,
@@ -1125,6 +1404,12 @@ tr.clickable { cursor: pointer; }
         <option value="regime_router">🧭 regime_router · 状态路由</option>
         <option value="ema_cross">✖️ ema_cross · EMA双均线交叉</option>
         <option value="dip_buy">🛡️ dip_buy · NFI深回调买</option>
+        <option value="supertrend">📈 supertrend · ATR趋势跟踪</option>
+        <option value="macd_cross">📊 macd_cross · MACD金叉死叉</option>
+        <option value="bb_reversion">📐 bb_reversion · 布林带回归</option>
+        <option value="ichimoku">☁️ ichimoku · 一目均衡云图</option>
+        <option value="grid_step">🔲 grid_step · 网格阶梯</option>
+        <option value="combo">🧩 combo · 组合策略(多子策略分仓)</option>
       </select></div>
     </div>
     <div class="field"><label>参数 JSON（白名单见下方速查）</label>
@@ -1220,7 +1505,12 @@ function renderTemplates() {
     d.onclick = () => {
       document.getElementById('name').value = t.mode.slice(0,4) + '_' + i + '_' + Math.random().toString(36).slice(2,6);
       document.getElementById('mode').value = t.mode;
-      document.getElementById('params').value = JSON.stringify(t.params, null, 2);
+      document.getElementById('params').value = t.combo
+        ? JSON.stringify(t.params, null, 2)
+        : JSON.stringify(t.params, null, 2);
+      if (t.combo) {
+        document.getElementById('params').value = "// combo 模式：子策略数组写在下方「combo」提示里\n// 提交时请把完整 JSON（含 combo 数组）粘贴到参数框\n" + JSON.stringify({combo: t.combo}, null, 2);
+      }
       toast('已填充「' + t.name + '」— 改个名字提交');
       document.getElementById('name').focus();
       document.getElementById('name').select();
@@ -1357,9 +1647,15 @@ function fmt(v){ return (v===undefined||v===null||v==='') ? '—' : (+v).toFixed
 
 function currentSpec() {
   let params = {};
+  let combo = undefined;
   const raw = document.getElementById('params').value.trim();
-  if (raw) params = JSON.parse(raw);
+  if (raw) {
+    const parsed = JSON.parse(raw.replace(/^\/\/.*$/gm, ''));
+    if (parsed.combo) { combo = parsed.combo; params = parsed.params || {}; }
+    else params = parsed;
+  }
   return {
+    combo,
     name: document.getElementById('name').value.trim(),
     author: document.getElementById('author').value.trim() || 'anonymous',
     mode: document.getElementById('mode').value,

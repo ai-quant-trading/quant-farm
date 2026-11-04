@@ -1,9 +1,10 @@
 use crate::config::{StrategyConfig, StrategyMode};
 use crate::indicators::{
-    atr, atr_percentile, atr_series, avg_volume, donchian_high, donchian_low, ema,
+    atr, atr_percentile, atr_series, avg_volume, donchian_high, donchian_low, ema, ema_series,
 };
 use crate::types::{Candle, ExitReason, MarketRegime, Position, Side, SymbolSpec};
 use rust_decimal::Decimal;
+use rust_decimal::prelude::ToPrimitive;
 use rust_decimal_macros::dec;
 use std::collections::HashMap;
 
@@ -627,6 +628,397 @@ fn scan_dip_buy_signals(
     signals.into_iter().take(cfg.top_k_momentum).collect()
 }
 
+
+/// SuperTrend 趋势跟踪（开源流行指标）：ATR 通道线翻转即趋势翻转。
+fn scan_supertrend_signals(
+    universe_candles: &HashMap<String, &[Candle]>,
+    cfg: &StrategyConfig,
+) -> Vec<SignalCandidate> {
+    let mut signals = Vec::new();
+    for symbol in &cfg.universe {
+        if cfg.execution_blacklist.iter().any(|b| b == symbol) {
+            continue;
+        }
+        let candles = match universe_candles.get(symbol) {
+            Some(&c) if c.len() > cfg.st_atr_period * 3 + 10 => c,
+            _ => continue,
+        };
+        let p = cfg.st_atr_period;
+        // 逐根迭代 supertrend 线与方向
+        let mut dir_up = true;
+        let mut line = Decimal::ZERO;
+        let mut prev_line = Decimal::ZERO;
+        let mut prev_dir_up = true;
+        let mut first = true;
+        for i in (p + 1..candles.len()).rev().take(80).collect::<Vec<_>>() {
+            // 从较早处开始，迭代到最新（简化：直接计算最后 80 根的演化）
+            let _ = i;
+            break;
+        }
+        // 简化高效实现：只迭代最后 120 根
+        let start = candles.len().saturating_sub(120).max(p + 1);
+        let mut upper = Decimal::ZERO;
+        let mut lower = Decimal::ZERO;
+        for i in start..candles.len() {
+            let cur = &candles[i];
+            let prev_close = candles[i - 1].close;
+            // 局部 ATR（简化：用全局 ATR，趋势线语义保持）
+            let a = match atr(&candles[..=i], p) {
+                Some(x) if x > Decimal::ZERO => x,
+                _ => continue,
+            };
+            let hl2 = (cur.high + cur.low) / dec!(2);
+            let bu = hl2 + a * cfg.st_multiplier;
+            let bl = hl2 - a * cfg.st_multiplier;
+            upper = if bu < upper || prev_close > upper { bu } else { upper };
+            lower = if bl > lower || prev_close < lower { bl } else { lower };
+            prev_line = line;
+            prev_dir_up = dir_up;
+            line = if dir_up { lower } else { upper };
+            if dir_up && cur.close < line {
+                dir_up = false;
+                line = upper;
+            } else if !dir_up && cur.close > line {
+                dir_up = true;
+                line = lower;
+            }
+            if first {
+                first = false;
+                prev_dir_up = dir_up;
+                prev_line = line;
+            }
+        }
+        let last = candles.last().unwrap();
+        let cur_atr = match atr(candles, p) {
+            Some(x) if x > Decimal::ZERO => x,
+            _ => continue,
+        };
+        let flipped_up = !prev_dir_up && dir_up;
+        let flipped_down = prev_dir_up && !dir_up;
+        let (side, go) = if flipped_up {
+            (Side::Long, true)
+        } else if flipped_down && cfg.st_allow_short {
+            (Side::Short, true)
+        } else {
+            (Side::Long, false)
+        };
+        if !go {
+            continue;
+        }
+        let spec = SymbolSpec::default_for(symbol);
+        let stop_mult = stop_atr_mult(cfg);
+        let proposed_stop = match side {
+            Side::Long => spec.round_price(last.close - cur_atr * stop_mult),
+            Side::Short => spec.round_price(last.close + cur_atr * stop_mult),
+        };
+        let ok = match side {
+            Side::Long => proposed_stop > Decimal::ZERO && proposed_stop < last.close,
+            Side::Short => proposed_stop > last.close,
+        };
+        if ok {
+            signals.push(SignalCandidate {
+                symbol: symbol.clone(),
+                side,
+                score: dec!(1),
+                signal_close: last.close,
+                proposed_stop,
+                atr_val: cur_atr,
+            });
+        }
+    }
+    signals
+}
+
+/// MACD 金叉死叉（经典动量）：MACD 线上/下穿信号线。
+fn scan_macd_signals(
+    universe_candles: &HashMap<String, &[Candle]>,
+    cfg: &StrategyConfig,
+) -> Vec<SignalCandidate> {
+    let mut signals = Vec::new();
+    for symbol in &cfg.universe {
+        if cfg.execution_blacklist.iter().any(|b| b == symbol) {
+            continue;
+        }
+        let candles = match universe_candles.get(symbol) {
+            Some(&c) if c.len() > cfg.macd_slow + cfg.macd_signal + 10 => c,
+            _ => continue,
+        };
+        let closes: Vec<Decimal> = candles.iter().map(|c| c.close).collect();
+        let ef = ema_series(&closes, cfg.macd_fast);
+        let es = ema_series(&closes, cfg.macd_slow);
+        let n = closes.len();
+        let at = |i: usize| -> Option<Decimal> {
+            match (ef.get(i), es.get(i)) {
+                (Some(Some(f)), Some(Some(s))) => Some(f - s),
+                _ => None,
+            }
+        };
+        let (m_now, m_prev) = match (at(n - 1), at(n - 2)) {
+            (Some(a), Some(b)) => (a, b),
+            _ => continue,
+        };
+        // 信号线 = MACD 序列的 EMA
+        let macd_vals: Vec<Decimal> = (cfg.macd_slow - 1..n)
+            .filter_map(at)
+            .collect();
+        if macd_vals.len() <= cfg.macd_signal {
+            continue;
+        }
+        let sig_series = ema_series(&macd_vals, cfg.macd_signal);
+        let (s_now, s_prev) = match (sig_series.last().unwrap(), sig_series[sig_series.len() - 2]) {
+            (Some(a), Some(b)) => (*a, b),
+            _ => continue,
+        };
+        let last = candles.last().unwrap();
+        let cur_atr = match atr(candles, cfg.atr_period) {
+            Some(x) if x > Decimal::ZERO => x,
+            _ => continue,
+        };
+        let golden = m_prev <= s_prev && m_now > s_now;
+        let death = m_prev >= s_prev && m_now < s_now;
+        let side = if golden {
+            Side::Long
+        } else if death && cfg.macd_allow_short {
+            Side::Short
+        } else {
+            continue;
+        };
+        let spec = SymbolSpec::default_for(symbol);
+        let stop_mult = stop_atr_mult(cfg);
+        let proposed_stop = match side {
+            Side::Long => spec.round_price(last.close - cur_atr * stop_mult),
+            Side::Short => spec.round_price(last.close + cur_atr * stop_mult),
+        };
+        let ok = match side {
+            Side::Long => proposed_stop > Decimal::ZERO && proposed_stop < last.close,
+            Side::Short => proposed_stop > last.close,
+        };
+        if ok {
+            signals.push(SignalCandidate {
+                symbol: symbol.clone(),
+                side,
+                score: dec!(1),
+                signal_close: last.close,
+                proposed_stop,
+                atr_val: cur_atr,
+            });
+        }
+    }
+    signals
+}
+
+/// 布林带回归：收盘跌破下轨 + 收阳企稳 → LONG；上轨镜像做空。
+fn scan_bb_reversion_signals(
+    universe_candles: &HashMap<String, &[Candle]>,
+    cfg: &StrategyConfig,
+) -> Vec<SignalCandidate> {
+    let mut signals = Vec::new();
+    for symbol in &cfg.universe {
+        if cfg.execution_blacklist.iter().any(|b| b == symbol) {
+            continue;
+        }
+        let candles = match universe_candles.get(symbol) {
+            Some(&c) if c.len() > cfg.bb_period + 10 => c,
+            _ => continue,
+        };
+        let last = candles.last().unwrap();
+        let closes: Vec<Decimal> = candles[..candles.len() - 1]
+            .iter()
+            .map(|c| c.close)
+            .collect();
+        if closes.len() < cfg.bb_period {
+            continue;
+        }
+        let win = &closes[closes.len() - cfg.bb_period..];
+        let mean = win.iter().copied().sum::<Decimal>() / Decimal::from(cfg.bb_period);
+        let var = win
+            .iter()
+            .map(|v| {
+                let d = v - mean;
+                d * d
+            })
+            .sum::<Decimal>()
+            / Decimal::from(cfg.bb_period);
+        let std = Decimal::from_f64_retain((var.to_f64().unwrap_or(0.0)).sqrt()).unwrap_or(Decimal::ZERO);
+        let upper = mean + std * cfg.bb_std;
+        let lower = mean - std * cfg.bb_std;
+        let cur_atr = match atr(candles, cfg.atr_period) {
+            Some(x) if x > Decimal::ZERO => x,
+            _ => continue,
+        };
+        let spec = SymbolSpec::default_for(symbol);
+        let stop_mult = stop_atr_mult(cfg);
+        let (side, ok) = if last.close < lower && last.close > last.open {
+            let st = spec.round_price(last.close - cur_atr * stop_mult);
+            if st > Decimal::ZERO && st < last.close {
+                signals.push(SignalCandidate {
+                    symbol: symbol.clone(),
+                    side: Side::Long,
+                    score: dec!(1),
+                    signal_close: last.close,
+                    proposed_stop: st,
+                    atr_val: cur_atr,
+                });
+            }
+            (Side::Long, true)
+        } else if last.close > upper && last.close < last.open && cfg.bb_allow_short {
+            let st = spec.round_price(last.close + cur_atr * stop_mult);
+            if st > last.close {
+                signals.push(SignalCandidate {
+                    symbol: symbol.clone(),
+                    side: Side::Short,
+                    score: dec!(1),
+                    signal_close: last.close,
+                    proposed_stop: st,
+                    atr_val: cur_atr,
+                });
+            }
+            (Side::Short, true)
+        } else {
+            (Side::Long, false)
+        };
+        let _ = (side, ok, upper);
+    }
+    signals
+}
+
+/// 一目均衡云图：价格在云上方 + 转换线上穿基准线 → LONG（云下镜像做空）。
+fn scan_ichimoku_signals(
+    universe_candles: &HashMap<String, &[Candle]>,
+    cfg: &StrategyConfig,
+) -> Vec<SignalCandidate> {
+    let mid = |candles: &[Candle], period: usize| -> Option<Decimal> {
+        if candles.len() < period || period == 0 {
+            return None;
+        }
+        let win = &candles[candles.len() - period..];
+        let hi = win.iter().map(|c| c.high).max()?;
+        let lo = win.iter().map(|c| c.low).min()?;
+        Some((hi + lo) / dec!(2))
+    };
+    let mut signals = Vec::new();
+    for symbol in &cfg.universe {
+        if cfg.execution_blacklist.iter().any(|b| b == symbol) {
+            continue;
+        }
+        let candles = match universe_candles.get(symbol) {
+            Some(&c) if c.len() > cfg.ichi_spanb + cfg.ichi_kijun + 10 => c,
+            _ => continue,
+        };
+        let n = candles.len();
+        let tk = |off: usize| mid(&candles[..n - off], cfg.ichi_tenkan);
+        let kj = |off: usize| mid(&candles[..n - off], cfg.ichi_kijun);
+        // 云 = 26 根前计算的先行带（senkou a/b），投射到当前
+        let shift = 26;
+        let (sa_now, sb_now) = match (tk(shift), kj(shift)) {
+            (Some(t), Some(k)) => {
+                let a = (t + k) / dec!(2);
+                let b = match mid(&candles[..n - shift], cfg.ichi_spanb) {
+                    Some(v) => v,
+                    None => continue,
+                };
+                (a, b)
+            }
+            _ => continue,
+        };
+        let cloud_top = sa_now.max(sb_now);
+        let cloud_bot = sa_now.min(sb_now);
+        let last = candles.last().unwrap();
+        let (t_now, k_now) = match (tk(0), kj(0)) {
+            (Some(a), Some(b)) => (a, b),
+            _ => continue,
+        };
+        let (t_prev, k_prev) = match (tk(1), kj(1)) {
+            (Some(a), Some(b)) => (a, b),
+            _ => continue,
+        };
+        let cur_atr = match atr(candles, cfg.atr_period) {
+            Some(x) if x > Decimal::ZERO => x,
+            _ => continue,
+        };
+        let spec = SymbolSpec::default_for(symbol);
+        let stop_mult = stop_atr_mult(cfg);
+        let long_ok = last.close > cloud_top
+            && t_prev <= k_prev
+            && t_now > k_now;
+        let short_ok = cfg.ichi_allow_short
+            && last.close < cloud_bot
+            && t_prev >= k_prev
+            && t_now < k_now;
+        let side = if long_ok {
+            Side::Long
+        } else if short_ok {
+            Side::Short
+        } else {
+            continue;
+        };
+        let proposed_stop = match side {
+            Side::Long => spec.round_price(last.close - cur_atr * stop_mult),
+            Side::Short => spec.round_price(last.close + cur_atr * stop_mult),
+        };
+        let ok = match side {
+            Side::Long => proposed_stop > Decimal::ZERO && proposed_stop < last.close,
+            Side::Short => proposed_stop > last.close,
+        };
+        if ok {
+            signals.push(SignalCandidate {
+                symbol: symbol.clone(),
+                side,
+                score: dec!(1),
+                signal_close: last.close,
+                proposed_stop,
+                atr_val: cur_atr,
+            });
+        }
+    }
+    signals
+}
+
+/// 网格阶梯（简化信号版）：收盘跌离 SMA20 达 N% → LONG 接（每根 K 线最多一档）。
+fn scan_grid_step_signals(
+    universe_candles: &HashMap<String, &[Candle]>,
+    cfg: &StrategyConfig,
+) -> Vec<SignalCandidate> {
+    let mut signals = Vec::new();
+    for symbol in &cfg.universe {
+        if cfg.execution_blacklist.iter().any(|b| b == symbol) {
+            continue;
+        }
+        let candles = match universe_candles.get(symbol) {
+            Some(&c) if c.len() > 25 => c,
+            _ => continue,
+        };
+        let last = candles.last().unwrap();
+        let closes: Vec<Decimal> = candles.iter().map(|c| c.close).collect();
+        let sma20 = match ema(&closes, 20) {
+            Some(v) if v > Decimal::ZERO => v,
+            _ => continue,
+        };
+        // 价格低于 SMA20 超过 grid_step_pct → 接一档
+        if last.close >= sma20 * (Decimal::ONE - cfg.grid_step_pct) {
+            continue;
+        }
+        let cur_atr = match atr(candles, cfg.atr_period) {
+            Some(x) if x > Decimal::ZERO => x,
+            _ => continue,
+        };
+        let spec = SymbolSpec::default_for(symbol);
+        let stop_mult = stop_atr_mult(cfg);
+        let proposed_stop = spec.round_price(last.close - cur_atr * stop_mult);
+        if proposed_stop > Decimal::ZERO && proposed_stop < last.close {
+            signals.push(SignalCandidate {
+                symbol: symbol.clone(),
+                side: Side::Long,
+                score: dec!(1),
+                signal_close: last.close,
+                proposed_stop,
+                atr_val: cur_atr,
+            });
+        }
+    }
+    signals
+}
+
 pub fn scan_entry_signals(
     regime: MarketRegime,
     universe_candles: &HashMap<String, &[Candle]>,
@@ -673,6 +1065,25 @@ pub fn scan_entry_signals(
     // NFI 精神深回调买：上升趋势 + 深度跌离均线 + 阳线企稳（与大盘状态无关，趋势自带）
     if cfg.mode == StrategyMode::DipBuy {
         return scan_dip_buy_signals(universe_candles, cfg);
+    }
+    if cfg.mode == StrategyMode::SuperTrend {
+        return scan_supertrend_signals(universe_candles, cfg);
+    }
+    if cfg.mode == StrategyMode::MacdCross {
+        return scan_macd_signals(universe_candles, cfg);
+    }
+    if cfg.mode == StrategyMode::BbReversion {
+        return scan_bb_reversion_signals(universe_candles, cfg);
+    }
+    if cfg.mode == StrategyMode::Ichimoku {
+        return scan_ichimoku_signals(universe_candles, cfg);
+    }
+    if cfg.mode == StrategyMode::GridStep {
+        return scan_grid_step_signals(universe_candles, cfg);
+    }
+    // Combo 在 Book 层拆分为子策略执行，单策略扫描层不可达
+    if cfg.mode == StrategyMode::Combo {
+        return Vec::new();
     }
     if regime == MarketRegime::Chop {
         return Vec::new();
@@ -795,7 +1206,14 @@ pub fn scan_entry_signals(
                     StrategyMode::ChopMeanReversion => false,
                     // BearShort 模式在函数入口已分流到 scan_bear_short_signals，趋势臂不可达
                     StrategyMode::BearShort => false,
-                    StrategyMode::EmaCross | StrategyMode::DipBuy => false,
+                    StrategyMode::EmaCross
+                    | StrategyMode::DipBuy
+                    | StrategyMode::SuperTrend
+                    | StrategyMode::MacdCross
+                    | StrategyMode::BbReversion
+                    | StrategyMode::Ichimoku
+                    | StrategyMode::GridStep
+                    | StrategyMode::Combo => false,
                     // RegimeRouter 在函数入口已按大盘状态分流，不会走到趋势臂的 mode 判断
                     StrategyMode::RegimeRouter => false,
                 };
