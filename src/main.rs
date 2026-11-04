@@ -211,6 +211,21 @@ enum Commands {
     },
     /// 查看影子模式账本（BearShort 零资金并行实盘积累 live OOS 证据）
     ShadowStatus,
+    /// 策略农场服务器：生产+影子+多策略并行账本 + Web UI 提交/排行榜（与 paper-db 二选一运行）
+    FarmServer {
+        /// HTTP 端口
+        #[arg(long, default_value_t = 8787)]
+        port: u16,
+        /// 生产账本数据库路径
+        #[arg(long, default_value = "data/coin_ai.db")]
+        db_path: String,
+        /// 农场数据目录（注册表+各账本库）
+        #[arg(long, default_value = "data/farm")]
+        farm_dir: String,
+        /// 巡检间隔秒数
+        #[arg(short, long, default_value_t = 10)]
+        interval_secs: u64,
+    },
     /// Monte Carlo 鲁棒性检验：Bootstrap 重抽 + 成本压力 + 参数扰动 ±20% + Bonferroni 校正
     MonteCarlo {
         /// 回测 K 线根数
@@ -534,7 +549,7 @@ async fn main() -> Result<()> {
                     .await?;
             }
             engine
-                .run_live_api_sqlite_ticks(&data_mgr, cycles, interval_secs, refresh_cycles)
+                .run_live_api_sqlite_ticks(&data_mgr, cycles, interval_secs, refresh_cycles, None)
                 .await?;
             engine.print_sqlite_report()?;
         }
@@ -597,6 +612,27 @@ async fn main() -> Result<()> {
         }
         Commands::ShadowStatus => {
             coin_ai::shadow::print_shadow_status(&cfg)?;
+        }
+        Commands::FarmServer {
+            port,
+            db_path,
+            farm_dir,
+            interval_secs,
+        } => {
+            let farm = std::sync::Arc::new(tokio::sync::Mutex::new(
+                coin_ai::farm::Farm::load(&cfg, &data_mgr, &farm_dir)?,
+            ));
+            // Web UI / API 在后台跑，主循环照常驱动生产+影子+农场
+            let http_farm = farm.clone();
+            tokio::spawn(async move {
+                if let Err(e) = coin_ai::farm::serve(http_farm, port).await {
+                    tracing::error!("[农场] Web 服务退出: {}", e);
+                }
+            });
+            let engine = SqlitePaperEngine::new(cfg.clone(), &db_path)?;
+            engine
+                .run_live_api_sqlite_ticks(&data_mgr, 999_999_999, interval_secs, 360, Some(farm))
+                .await?;
         }
         Commands::MonteCarlo {
             bars,

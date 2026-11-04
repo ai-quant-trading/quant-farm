@@ -1057,6 +1057,7 @@ impl SqlitePaperEngine {
         cycles: usize,
         interval_secs: u64,
         metric_refresh_cycles: usize,
+        farm: Option<std::sync::Arc<tokio::sync::Mutex<crate::farm::Farm>>>,
     ) -> Result<()> {
         let db = TradingDatabase::open(&self.db_path, self.cfg.account.initial_equity)?;
         let fee_rate = self.cfg.costs.taker_fee_rate;
@@ -1122,6 +1123,11 @@ impl SqlitePaperEngine {
         // 启动即扫一次影子候选（不等整点刷新——熊市正在进行）
         if let Some(sh) = shadow.as_mut() {
             sh.on_metrics(&btc_candles, &universe_candles, regime);
+        }
+        // 策略农场：恢复全部账本并首扫（零资金并行，Web UI 提交入口）
+        if let Some(f) = farm.as_ref() {
+            let mut fguard = f.lock().await;
+            fguard.on_metrics(&btc_candles, &universe_candles, regime);
         }
         let mut refresh_task: Option<
             tokio::task::JoinHandle<
@@ -1191,6 +1197,11 @@ impl SqlitePaperEngine {
                             // 影子模式整点重算 BearShort 候选信号（真信号零资金）
                             if let Some(sh) = shadow.as_mut() {
                                 sh.on_metrics(&btc_candles, &universe_candles, regime);
+                            }
+                            // 策略农场整点重算全部账本候选
+                            if let Some(f) = farm.as_ref() {
+                                let mut fguard = f.lock().await;
+                                fguard.on_metrics(&btc_candles, &universe_candles, regime);
                             }
                         }
                         Ok(Err(e)) => {
@@ -1573,6 +1584,11 @@ impl SqlitePaperEngine {
                 if let Err(e) = sh.on_cycle(&quotes, regime, &coin_metrics, now_ms) {
                     warn!("[影子巡检失败] {} (影子本轮跳过，不影响生产)", e);
                 }
+            }
+            // 策略农场每拍巡检（全部账本零资金并行）
+            if let Some(f) = farm.as_ref() {
+                let mut fguard = f.lock().await;
+                fguard.on_cycle(&quotes, regime, &coin_metrics, now_ms);
             }
 
             let (q_cnt, o_cnt, p_cnt, t_cnt) = db.count_table_rows()?;

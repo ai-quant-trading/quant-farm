@@ -108,7 +108,7 @@ fn test_shadow_lifecycle_and_production_isolation() {
     universe.insert("BTCUSDT".to_string(), alt);
     engine.on_metrics(&btc, &universe, MarketRegime::Bear);
     assert!(
-        !engine.pending_entries.is_empty(),
+        !engine.book.pending_entries.is_empty(),
         "成熟熊市 + 破位形态应产生影子候选"
     );
 
@@ -121,7 +121,7 @@ fn test_shadow_lifecycle_and_production_isolation() {
     engine
         .on_cycle(&quotes, MarketRegime::Bear, &metrics, 1_700_100_000_000)
         .unwrap();
-    let positions = engine.db.list_positions().unwrap();
+    let positions = engine.book.db.list_positions().unwrap();
     assert_eq!(positions.len(), 1, "影子应开立 1 个空单");
     assert_eq!(positions[0].side, "SHORT");
     let entry = positions[0].entry_price;
@@ -132,10 +132,10 @@ fn test_shadow_lifecycle_and_production_isolation() {
     engine
         .on_cycle(&quotes2, MarketRegime::Bear, &metrics, 1_700_100_060_000)
         .unwrap();
-    let trades = engine.db.list_recent_trades(100).unwrap();
+    let trades = engine.book.db.list_recent_trades(100).unwrap();
     assert!(!trades.is_empty(), "暴跌后影子空单应止盈离场");
     assert!(trades[0].net_pnl > Decimal::ZERO, "止盈出场应为正收益");
-    assert!(trades[0].exit_reason.contains("影子"));
+    assert!(trades[0].exit_reason.contains("农场"));
 
     // ---- 生产隔离断言：影子全程运行后，生产库零订单零持仓 ----
     let (_, prod_orders, prod_positions, prod_trades) = prod.count_table_rows().unwrap();
@@ -143,11 +143,11 @@ fn test_shadow_lifecycle_and_production_isolation() {
 
     // 冷却：刚平仓的币种 30 分钟内禁止影子重开
     engine.on_metrics(&btc, &universe, MarketRegime::Bear);
-    assert!(!engine.pending_entries.is_empty());
+    assert!(!engine.book.pending_entries.is_empty());
     engine
         .on_cycle(&quotes2, MarketRegime::Bear, &metrics, 1_700_100_120_000)
         .unwrap();
-    let after = engine.db.list_positions().unwrap();
+    let after = engine.book.db.list_positions().unwrap();
     assert!(after.is_empty(), "冷却期内禁止原地重开");
 }
 

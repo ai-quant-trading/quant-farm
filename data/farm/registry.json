@@ -1,0 +1,71 @@
+[
+  {
+    "spec": {
+      "name": "richie_bear_tight",
+      "author": "richie",
+      "mode": "bear_short",
+      "params": {
+        "bear_tp_atr": "4.0",
+        "bear_maturity_bars": 24,
+        "bear_stop_atr": "2.5",
+        "bear_time_stop_bars": 10
+      },
+      "universe": [
+        "SOLUSDT",
+        "AVAXUSDT",
+        "LINKUSDT",
+        "SUIUSDT"
+      ],
+      "initial_equity": "100"
+    },
+    "status": "active",
+    "validation": {
+      "spec_name": "richie_bear_tight",
+      "pass": true,
+      "reasons": [
+        "全部门槛通过"
+      ],
+      "full_return_pct": "5.76697007000000",
+      "full_pf": "1.1744958272063591630298758534",
+      "full_trades": 167,
+      "half_return_pct": "4.78269890200000",
+      "half_pf": "1.2779739160237006905036397255",
+      "cost15_equity": "103.65266039500000",
+      "validated_at": "2026-11-04T11:07:02.522723+00:00"
+    },
+    "submitted_at": "2026-11-04T11:07:02.527228+00:00"
+  },
+  {
+    "spec": {
+      "name": "junk_no_volume_filter",
+      "author": "tester",
+      "mode": "bear_short",
+      "params": {
+        "bear_stop_atr": "1.0",
+        "volume_surge_mult": "1.0",
+        "bear_tp_atr": "0.5"
+      },
+      "universe": null,
+      "initial_equity": "100"
+    },
+    "status": "rejected",
+    "validation": {
+      "spec_name": "junk_no_volume_filter",
+      "pass": false,
+      "reasons": [
+        "全样本 PF 0.68 <= 1.1",
+        "全样本净利 -16.10 <= 0",
+        "前半样本净利 -7.39 <= 0（边际不稳定）",
+        "成本×1.5 后净利翻负（成本敏感）"
+      ],
+      "full_return_pct": "-16.101784696000000",
+      "full_pf": "0.6820023463635331560372488235",
+      "full_trades": 414,
+      "half_return_pct": "-7.396424706000000",
+      "half_pf": "0.7469553730635570198213554494",
+      "cost15_equity": "77.839664679000000",
+      "validated_at": "2026-11-04T11:07:17.759865+00:00"
+    },
+    "submitted_at": "2026-11-04T11:07:17.759883+00:00"
+  }
+]
