@@ -845,17 +845,28 @@ const INDEX_HTML: &str = r#"<!DOCTYPE html>
   th { background: #1e293b; }
   tr.active { color: #4ade80; } tr.rejected { color: #f87171; } tr.archived { color: #64748b; }
   input, select, textarea { background: #1e293b; color: #e2e8f0; border: 1px solid #334155; padding: 6px; border-radius: 4px; width: 320px; box-sizing: border-box; }
-  textarea { width: 640px; height: 140px; font-family: monospace; }
+  textarea { width: 660px; height: 150px; font-family: monospace; font-size: 12px; }
   button { background: #2563eb; color: white; border: none; padding: 8px 20px; border-radius: 4px; cursor: pointer; margin-top: 8px; }
+  button.sec { background: #334155; padding: 6px 14px; font-size: 12px; }
   #msg { margin-top: 10px; font-size: 13px; white-space: pre-wrap; }
   .badge { padding: 1px 8px; border-radius: 10px; font-size: 11px; }
+  .tpl { display: inline-block; border: 1px solid #334155; border-radius: 6px; padding: 10px 12px; margin: 4px 6px 4px 0; cursor: pointer; font-size: 13px; background: #1e293b; }
+  .tpl:hover { border-color: #2563eb; }
+  .tpl small { display: block; color: #94a3b8; margin-top: 4px; max-width: 300px; }
+  details { margin-top: 12px; font-size: 13px; }
+  summary { cursor: pointer; color: #7dd3fc; }
+  code { background: #1e293b; padding: 1px 5px; border-radius: 3px; font-size: 12px; }
+  pre { background: #1e293b; padding: 10px; border-radius: 6px; overflow-x: auto; font-size: 12px; }
 </style>
 </head>
 <body>
 <h1>🌾 Coin-AI 策略农场</h1>
-<p style="color:#94a3b8;font-size:13px">提交参数化策略 → 自动验证门（全样本 PF&gt;1.1 + 前半样本为正 + 成本×1.5 存活）→ 通过即开零资金账本与生产并行。风控参数不可覆盖，所有账本独立熔断。</p>
+<p style="color:#94a3b8;font-size:13px">提交参数化策略 → 自动验证门（全样本 PF&gt;1.1 + 前半样本为正 + 成本×1.5 存活）→ 通过即开零资金账本并行。风控参数不可覆盖，所有账本独立熔断。完整文档见仓库 <code>docs/strategy-guide.md</code>。</p>
 
-<h2>提交策略</h2>
+<h2>① 选模板（点击一键填充，然后改名字微调参数）</h2>
+<div id="tpls"></div>
+
+<h2>② 提交</h2>
 <div>
   <div style="margin:4px 0">名称 <input id="name" placeholder="my_bear_v2"> 作者 <input id="author" placeholder="你的名字" style="width:120px">
   模式 <select id="mode">
@@ -864,22 +875,90 @@ const INDEX_HTML: &str = r#"<!DOCTYPE html>
     <option value="chop_mean_reversion">chop_mean_reversion 震荡回归</option>
     <option value="regime_router">regime_router 状态路由</option>
   </select></div>
-  <div style="margin:4px 0;position:relative;top:6px">参数 JSON（白名单: bear_stop_atr, bear_tp_atr, bear_maturity_bars, donchian_period, volume_surge_mult, initial_stop_atr_mult, chandelier_atr_mult, time_stop_bars, top_k_momentum, regime_adx_threshold 等）</div>
-  <textarea id="params">{
-  "bear_stop_atr": "2.5",
-  "bear_tp_atr": "4.0",
-  "bear_maturity_bars": 24
-}</textarea>
-  <br><button onclick="submitStrategy()">提交并验证（约 10~30 秒）</button>
+  <div style="margin:8px 0 4px;color:#94a3b8;font-size:12px">参数 JSON（白名单见下方速查表；字符串数字都要带引号，整数不用）</div>
+  <textarea id="params" spellcheck="false"></textarea>
+  <div>
+    <button onclick="submitStrategy()">🚀 提交并验证（约 10~30 秒）</button>
+    <button class="sec" onclick="copyCurl()">📋 复制 curl 命令</button>
+    <button class="sec" onclick="fillCurl()">生成 curl 到下方</button>
+  </div>
   <div id="msg"></div>
+  <pre id="curlbox" style="display:none"></pre>
 </div>
 
-<h2>排行榜（每 10 秒刷新）</h2>
+<details>
+<summary>📐 参数速查表（点击展开全部 25 个白名单参数）</summary>
+<table>
+<tr><th>参数</th><th>含义</th><th>建议范围</th></tr>
+<tr><td><code>top_k_momentum</code></td><td>按动量取前 N 强/弱币</td><td>1-3</td></tr>
+<tr><td><code>donchian_period</code></td><td>突破通道回看小时数</td><td>16-30</td></tr>
+<tr><td><code>volume_surge_mult</code></td><td>放量确认倍数（别低于1.2！）</td><td>1.1-1.6</td></tr>
+<tr><td><code>atr_period</code></td><td>ATR 周期</td><td>10-20</td></tr>
+<tr><td><code>max_bias_pct</code></td><td>乖离上限（防追极端）</td><td>0.05-0.10</td></tr>
+<tr><td><code>regime_adx_threshold</code></td><td>趋势确认 ADX 门槛</td><td>18-25</td></tr>
+<tr><td><code>initial_stop_atr_mult</code></td><td>多头初始止损 ×ATR</td><td>1.8-2.8</td></tr>
+<tr><td><code>chandelier_atr_mult</code></td><td>吊灯移动止盈 ×ATR</td><td>2.5-4.0</td></tr>
+<tr><td><code>breakeven_r_mult</code></td><td>浮盈到 N R 保本移损</td><td>1.0-2.0</td></tr>
+<tr><td><code>time_stop_bars</code></td><td>多头时间止损（小时）</td><td>10-24</td></tr>
+<tr><td><code>time_stop_min_r</code></td><td>时间止损最低浮盈 R</td><td>0.2-0.6</td></tr>
+<tr><td><code>bear_stop_atr</code></td><td>空头止损（要比多头宽）</td><td>2.0-3.5</td></tr>
+<tr><td><code>bear_tp_atr</code></td><td>空头固定止盈（TP&gt;SL）</td><td>3.0-5.0</td></tr>
+<tr><td><code>bear_maturity_bars</code></td><td>熊市确认门槛（小时）</td><td>12-48</td></tr>
+<tr><td><code>bear_time_stop_bars</code></td><td>空头时间止损</td><td>8-16</td></tr>
+<tr><td><code>bear_entry_variant</code></td><td>breakdown / rejection / both</td><td>both</td></tr>
+<tr><td><code>bear_max_atr_percentile</code></td><td>危机护栏 ATR 分位上限</td><td>90-99</td></tr>
+<tr><td><code>min_atr_percentile</code></td><td>波动率过滤（0=关）</td><td>0 或 70+</td></tr>
+<tr><td><code>max_recent_move_bps</code></td><td>下单前波动闸门 bps</td><td>30</td></tr>
+<tr><td><code>chop_mr_*</code></td><td>震荡回归系列（见文档）</td><td>—</td></tr>
+</table>
+</details>
+
+<details>
+<summary>⚠️ 验证门判例（实测踩坑，提交前自查）</summary>
+<ul style="font-size:13px;color:#cbd5e1">
+<li><b>去掉放量确认</b>（volume_surge 1.0）→ 414 笔亏 16%，假突破磨损</li>
+<li><b>止盈贴太近</b>（tp 0.5×ATR）→ 双边 0.2% 成本吃掉全部利润</li>
+<li><b>只对近期行情调参</b> → 前半样本门直接拒（两段都得为正）</li>
+<li><b>交易 &lt;10 笔</b> → 样本不足拒收</li>
+</ul>
+</details>
+
+<h2>③ 排行榜（每 10 秒刷新）</h2>
 <table id="board"><thead><tr>
   <th>策略</th><th>作者</th><th>模式</th><th>状态</th><th>净值</th><th>收益%</th><th>回撤%</th><th>闭环</th><th>胜率%</th><th>PF</th><th>持仓</th><th>备注</th><th></th>
 </tr></thead><tbody></tbody></table>
 
 <script>
+const TEMPLATES = [
+  {name: "空头·网格最优", desc: "验证门实测通过的最优空头参数（全样本 +5.8% PF 1.17）", mode: "bear_short",
+   params: {bear_stop_atr: "2.5", bear_tp_atr: "4.0", bear_maturity_bars: 24, bear_time_stop_bars: 10}},
+  {name: "空头·只做压破", desc: "只在放量跌破 20 期低点时做空（顺势追跌变体）", mode: "bear_short",
+   params: {bear_entry_variant: "breakdown", bear_stop_atr: "2.5", bear_tp_atr: "4.0"}},
+  {name: "空头·只做衰竭", desc: "只在反弹到均线附近阴线拒绝时做空（不追跌，等反弹死）", mode: "bear_short",
+   params: {bear_entry_variant: "rejection", bear_stop_atr: "3.0", bear_tp_atr: "4.0"}},
+  {name: "多头·冠军原版", desc: "12 个月 +34% 的现役冠军参数（改名字即可提交对照账本）", mode: "long_only_breakout",
+   params: {donchian_period: 20, initial_stop_atr_mult: "2.2", chandelier_atr_mult: "3.0", time_stop_bars: 16}},
+  {name: "路由·全天候", desc: "牛做多/熊做空自动切换（回测 +43% 回撤 13.9% 的组合模式）", mode: "regime_router",
+   params: {bear_stop_atr: "3.0", bear_tp_atr: "4.0"}},
+  {name: "震荡·实验用", desc: "⚠️ 历史全负，基本会被门拒——除非你有新想法", mode: "chop_mean_reversion",
+   params: {chop_mr_stretch_atr: "2.0", chop_mr_tp_atr: "0.8"}},
+];
+function renderTemplates() {
+  const box = document.getElementById('tpls');
+  TEMPLATES.forEach((t, i) => {
+    const d = document.createElement('div');
+    d.className = 'tpl';
+    d.innerHTML = `<b>${t.name}</b><small>${t.desc}</small>`;
+    d.onclick = () => {
+      document.getElementById('name').value = 'tpl_' + i + '_' + Math.random().toString(36).slice(2,6);
+      document.getElementById('author').value = '';
+      document.getElementById('mode').value = t.mode;
+      document.getElementById('params').value = JSON.stringify(t.params, null, 2);
+      document.getElementById('msg').textContent = '已填充「' + t.name + '」——改个名字（和作者），按需微调参数后提交';
+    };
+    box.appendChild(d);
+  });
+}
 async function refresh() {
   try {
     const r = await fetch('/api/strategies');
@@ -895,36 +974,61 @@ async function refresh() {
         <td>${fmt(s.equity)}</td><td>${fmt(s.return_pct)}</td><td>${fmt(s.drawdown_pct)}</td>
         <td>${s.trades??''}</td><td>${fmt(s.win_rate_pct)}</td><td>${fmt(s.profit_factor)}</td>
         <td>${s.open_positions??''}</td><td style="max-width:280px">${reasons}</td>
-        <td>${s.status==='active'||s.status==='rejected'?`<button onclick="del('${s.name}')">下线</button>`:''}</td>`;
+        <td>${s.status==='active'||s.status==='rejected'?`<button class="sec" onclick="del('${s.name}')">下线</button>`:''}</td>`;
       tb.appendChild(tr);
     });
   } catch(e) { console.error(e); }
 }
 function fmt(v){ return (v===undefined||v===null)?'':(+v).toFixed(2); }
+function currentSpec() {
+  let params = {};
+  const raw = document.getElementById('params').value.trim();
+  if (raw) params = JSON.parse(raw);
+  return {
+    name: document.getElementById('name').value.trim(),
+    author: document.getElementById('author').value.trim() || 'anonymous',
+    mode: document.getElementById('mode').value,
+    params: params
+  };
+}
 async function submitStrategy() {
   const msg = document.getElementById('msg');
   msg.textContent = '验证中（全样本 + 前半样本 + 成本压力回测，约 10~30 秒）...';
   try {
-    let params = {};
-    const raw = document.getElementById('params').value.trim();
-    if (raw) params = JSON.parse(raw);
-    const body = {
-      name: document.getElementById('name').value.trim(),
-      author: document.getElementById('author').value.trim() || 'anonymous',
-      mode: document.getElementById('mode').value,
-      params: params
-    };
+    const body = currentSpec();
+    if (!body.name) { msg.textContent = '❌ 请先填策略名'; return; }
     const r = await fetch('/api/strategies', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
     const d = await r.json();
     if (!r.ok) { msg.textContent = '❌ ' + (d.error||JSON.stringify(d)); return; }
-    msg.textContent = (d.pass ? '✅ 通过并已开账本: ' : '❌ 被验证门拒收: ') + JSON.stringify(d.reasons);
+    msg.textContent = (d.pass ? '✅ 通过验证并已开零资金账本: ' : '❌ 被验证门拒收: ') + JSON.stringify(d.reasons)
+      + (d.pass ? '' : '  | 全样本 ' + (+d.full_return_pct).toFixed(1) + '% PF ' + (+d.full_pf).toFixed(2)
+                + ' / 前半 ' + (+d.half_return_pct).toFixed(1) + '%');
     refresh();
   } catch(e) { msg.textContent = '❌ ' + e; }
+}
+function buildCurl() {
+  return "curl -X POST http://<服务器>:8787/api/strategies -H 'Content-Type: application/json' -d '"
+    + JSON.stringify(currentSpec()) + "'";
+}
+function fillCurl() {
+  const box = document.getElementById('curlbox');
+  box.style.display = 'block';
+  try { box.textContent = buildCurl(); } catch(e) { box.textContent = '参数 JSON 有误: ' + e; }
+}
+function copyCurl() {
+  try {
+    const cmd = buildCurl();
+    navigator.clipboard.writeText(cmd).then(
+      () => { document.getElementById('msg').textContent = '📋 curl 命令已复制到剪贴板'; },
+      () => { fillCurl(); }
+    );
+  } catch(e) { fillCurl(); }
 }
 async function del(name) {
   await fetch('/api/strategies/'+name, {method:'DELETE'});
   refresh();
 }
+renderTemplates();
 refresh();
 setInterval(refresh, 10000);
 </script>
